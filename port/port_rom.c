@@ -48,6 +48,14 @@ static SpritePtr sSpritePtrsStable[512];
  * Bare filenames are also probed under the binary's own directory so
  * release-tarball layouts work regardless of the user's cwd. */
 static const char* kRomCandidates[] = {
+#ifdef __SWITCH__
+    /* Absolute SD-card paths so the ROM is found regardless of the cwd
+     * hbmenu hands us. Put your ROM at sdmc:/switch/tmc/baserom.gba. */
+    "/switch/tmc/baserom.gba",
+    "/switch/tmc/baserom_eu.gba",
+    "/switch/tmc/tmc.gba",
+    "/switch/tmc/tmc_eu.gba",
+#endif
     "baserom.gba",            /* USA default */
     "baserom_eu.gba",         /* EU default */
     "synthetic_baserom.gba",  /* generated from extracted assets */

@@ -16,6 +16,10 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#ifdef __SWITCH__
+#include <unistd.h>
+#include <sys/stat.h>
+#endif
 #include <SDL3/SDL.h>
 
 /*
@@ -225,6 +229,21 @@ static void Port_ReserveGbaAddressSpace(void) { /* not needed on Linux/macOS */ 
 
 int main(int argc, char* argv[]) {
 
+#ifdef __SWITCH__
+    /* Anchor all relative paths (ROM probe, rom_data/ + assets/ caches,
+     * config.json, EEPROM saves) to one known-writable SD folder, since the
+     * cwd hbmenu hands us varies. Put baserom.gba in this same folder. */
+    mkdir("/switch", 0777);
+    mkdir("/switch/tmc", 0777);
+    chdir("/switch/tmc");
+    /* Capture all the port's fprintf(stderr,...) boot tracing to a file on
+     * the SD. Unbuffered so a hard freeze still leaves the last line on disk
+     * — read sdmc:/switch/tmc/tmc.log to see exactly where a hang happened. */
+    freopen("tmc.log", "w", stderr);
+    setvbuf(stderr, NULL, _IONBF, 0);
+    fprintf(stderr, "=== TMC Switch boot log ===\n");
+#endif
+
     /* Must run before any std::vector / new / malloc that could land in
      * the GBA window. Static initializers in C++ files are constructed
      * before main, so even this is technically not early enough — but
@@ -313,6 +332,15 @@ int main(int argc, char* argv[]) {
      * closes, then second window opens." Confirmed by H9 logs:
      * window flags went from 0x220 → 0x222 across the first
      * SDL_CreateRenderer call, with driver=opengl. */
+#ifdef __SWITCH__
+    /* Force SDL's software renderer on Switch. ViruaPPU already produces a CPU
+     * framebuffer, so GPU rendering buys nothing — and it avoids Mesa-generated
+     * GLES shaders that emulator shader recompilers (Eden/yuzu) can't decode.
+     * Set here (after Port_InitVideo, which resets render-driver hints in its
+     * fallback path) and right before renderer creation so it actually sticks. */
+    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
+#endif
+
     SDL_Window* window = NULL;
     SDL_Renderer* prerenderer = NULL;
     if (!SDL_CreateWindowAndRenderer(

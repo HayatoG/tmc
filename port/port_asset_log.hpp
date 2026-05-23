@@ -159,7 +159,14 @@ void ParallelFor(Index begin, Index end, Fn body)
     }
 
     const std::size_t total = static_cast<std::size_t>(end - begin);
+#ifdef __SWITCH__
+    /* devkitA64's libstdc++ std::thread crashes silently a few seconds in
+     * (observed as the asset extraction freezing mid-way). Force the serial
+     * path on Switch — slower, but it actually completes. */
+    const std::size_t workers = 1;
+#else
     const std::size_t workers = std::min<std::size_t>(WorkerCount(), total);
+#endif
     if (workers <= 1) {
         for (Index i = begin; i < end; ++i) {
             body(i);

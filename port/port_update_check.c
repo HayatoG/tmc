@@ -1,3 +1,9 @@
+#ifdef __SWITCH__
+/* No network update check on Switch (no popen/curl shell-out). No-op. */
+#include "port_update_check.h"
+void Port_CheckForUpdates(SDL_Window* window) { (void)window; }
+#else
+
 #ifndef _WIN32
 #define _POSIX_C_SOURCE 200809L
 #endif
@@ -334,3 +340,5 @@ void Port_CheckForUpdates(SDL_Window* window) {
     FreeString(latestTag);
     FreeString(json);
 }
+
+#endif /* __SWITCH__ */

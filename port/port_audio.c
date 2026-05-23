@@ -4,6 +4,7 @@
 #include "port_m4a_backend.h"
 
 #include <math.h>
+#include <string.h>
 
 enum {
     PORT_AUDIO_SAMPLE_RATE = 48000,
@@ -11,7 +12,12 @@ enum {
     PORT_AUDIO_BYTES_PER_FRAME = sizeof(int16_t) * PORT_AUDIO_CHANNELS,
 };
 
+#ifdef __SWITCH__
+/* switch-sdl2 uses the SDL2 pull callback model instead of SDL3 streams. */
+static SDL_AudioDeviceID sAudioDev;
+#else
 static SDL_AudioStream* sAudioStream;
+#endif
 
 /* ---- Output DSP post-processing chain ------------------------------
  *
@@ -116,6 +122,34 @@ static void Port_Audio_PostProcess(int16_t* buffer, int frames) {
 
 extern Main gMain;
 
+#ifdef __SWITCH__
+/* SDL2 pull callback: fill `out` with `len` bytes of rendered audio. */
+static void Port_Audio_Feed(void* userdata, Uint8* out, int len) {
+    int remaining = len;
+    Uint8* dst = out;
+    (void)userdata;
+
+    while (remaining > 0) {
+        int frames = remaining / PORT_AUDIO_BYTES_PER_FRAME;
+        int16_t buffer[1024 * PORT_AUDIO_CHANNELS];
+
+        if (frames <= 0) {
+            break;
+        }
+        if (frames > 1024) {
+            frames = 1024;
+        }
+
+        Port_M4A_Backend_Render(buffer, (uint32_t)frames, gMain.muteAudio);
+        Port_Audio_PostProcess(buffer, frames);
+
+        int bytes = frames * PORT_AUDIO_BYTES_PER_FRAME;
+        memcpy(dst, buffer, (size_t)bytes);
+        dst += bytes;
+        remaining -= bytes;
+    }
+}
+#else
 static void Port_Audio_Feed(void* userdata, SDL_AudioStream* stream, int additional_amount, int total_amount) {
     int remaining = additional_amount;
     (void)userdata;
@@ -138,7 +172,41 @@ static void Port_Audio_Feed(void* userdata, SDL_AudioStream* stream, int additio
         remaining -= frames * PORT_AUDIO_BYTES_PER_FRAME;
     }
 }
+#endif
 
+#ifdef __SWITCH__
+bool Port_Audio_Init(void) {
+    if (!Port_M4A_Backend_Init(PORT_AUDIO_SAMPLE_RATE)) {
+        return false;
+    }
+
+    SDL_AudioSpec want, have;
+    SDL_zero(want);
+    want.freq = PORT_AUDIO_SAMPLE_RATE;
+    want.format = AUDIO_S16SYS;
+    want.channels = PORT_AUDIO_CHANNELS;
+    want.samples = 1024;
+    want.callback = Port_Audio_Feed;
+    want.userdata = NULL;
+
+    sAudioDev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
+    if (sAudioDev == 0) {
+        SDL_Log("Port_Audio_Init: SDL_OpenAudioDevice failed: %s", SDL_GetError());
+        return false;
+    }
+
+    SDL_PauseAudioDevice(sAudioDev, 0); /* start playback */
+    return true;
+}
+
+void Port_Audio_Shutdown(void) {
+    if (sAudioDev != 0) {
+        SDL_CloseAudioDevice(sAudioDev);
+        sAudioDev = 0;
+    }
+    Port_M4A_Backend_Shutdown();
+}
+#else
 bool Port_Audio_Init(void) {
     SDL_AudioSpec spec;
 
@@ -175,6 +243,7 @@ void Port_Audio_Shutdown(void) {
 
     Port_M4A_Backend_Shutdown();
 }
+#endif
 
 void Port_Audio_Reset(void) {
     Port_M4A_Backend_Reset();

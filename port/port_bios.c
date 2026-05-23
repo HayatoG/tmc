@@ -109,6 +109,12 @@ static void Port_PumpEvents(void) {
             gQuitRequested = true;
             continue;
         }
+#ifndef __SWITCH__
+        /* Keyboard shortcuts (fullscreen, fast-forward, debug menu, quicksave,
+         * bug report). The Switch has no keyboard; SDL3 keyboard-event struct
+         * fields differ from SDL2 anyway, so this whole block is PC-only. Game
+         * input on Switch comes from gamepad polling (Port_Config_HandleEvent
+         * below + the poll in this file's keyinput build). */
         if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat) {
             /* Soft-slot config overlay is highest priority: it consumes
              * navigation keys before the rest of the routing fires. */
@@ -174,6 +180,7 @@ static void Port_PumpEvents(void) {
             sFastForward = false;
             continue;
         }
+#endif /* !__SWITCH__ */
         /* Fast-forward via keyboard TAB only. The previous RIGHT_TRIGGER
          * gamepad shortcut conflicted with the default soft-slot R2 binding
          * (port_softslots.c) — pulling the trigger would simultaneously

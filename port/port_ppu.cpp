@@ -14,6 +14,14 @@
 #include <cstdlib>
 #include <cstring>
 
+#ifdef __SWITCH__
+/* On PC the `viruappu-internal-scale` patch adds this prototype to mode1.h.
+ * The Switch build skips that submodule patch (and links a no-op stub in
+ * platforms/switch/switch_stubs.c), so declare it here to keep the submodule
+ * pristine and the fork buildable from a clean clone. */
+extern "C" void virtuappu_mode1_render_affine_obj_overlay(uint32_t* dst, int dst_w, int dst_h, int scale);
+#endif
+
 /* Manual access to gMain (the engine's Main struct): including main.h
  * would pull in player.h, which uses `this` as a C parameter name and
  * doesn't compile as C++. Treat the symbol as opaque bytes and read the
@@ -461,7 +469,7 @@ extern "C" void Port_PPU_ToggleFullscreen(void) {
     if (!sWindow) {
         return;
     }
-    SDL_WindowFlags flags = SDL_GetWindowFlags(sWindow);
+    SDL_WindowFlags flags = (SDL_WindowFlags)SDL_GetWindowFlags(sWindow);
     bool wantFullscreen = (flags & SDL_WINDOW_FULLSCREEN) == 0;
     SDL_SetWindowFullscreen(sWindow, wantFullscreen);
     SDL_SyncWindow(sWindow);

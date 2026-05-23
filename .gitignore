@@ -1,6 +1,19 @@
 # build artifacts
 src/*.s
 build/*
+
+# Switch port build artifacts + pre-baked package (never commit the ROM)
+*.nro
+*.nacp
+*.pak
+platforms/switch/build/
+platforms/switch/dist/
+platforms/switch/sources.mk
+_extout/
+_extbuild/
+_sdlog*
+_sdtmp.txt
+
 !build/USA/
 build/USA/*
 !build/USA/assets/
@@ -111,3 +124,6 @@ baserom.gba
 run/
 config.json
 release/
+
+# stray build status files
+platforms/switch/build*.rc

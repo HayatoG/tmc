@@ -1,8 +1,10 @@
+/* fmt must be included before the game headers: gba/defines.h #defines
+ * PACKED, which would otherwise clobber fmt's `template <bool PACKED>`. */
+#include <fmt/format.h>
+
 #include "assets_extractor_api.hpp"
 #include "port_asset_log.hpp"
 #include "global.h"
-
-#include <fmt/format.h>
 
 #include <cstddef>
 #include <filesystem>

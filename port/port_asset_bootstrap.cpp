@@ -363,6 +363,19 @@ bool RunWithProgressScreen(SDL_Window* window, ProgressSnapshot& snap, Task task
         return task();
     }
 
+#ifdef __SWITCH__
+    /* devkitA64's libstdc++ std::async/std::thread is unreliable — the worker
+     * crashes silently a few seconds in (observed as the progress bar freezing
+     * mid-extraction). Run the extraction synchronously on the main thread
+     * instead. The bar won't animate while it works, but it completes safely.
+     * (A libnx threadCreate-based animated version is a future improvement.) */
+    DrawProgressScreen(window, renderer, snap);
+    fprintf(stderr, "[ASSET] running extraction synchronously (Switch)\n");
+    const bool okSync = task();
+    fprintf(stderr, "[ASSET] extraction returned %d\n", (int)okSync);
+    DrawProgressScreen(window, renderer, snap);
+    return okSync;
+#else
     auto future = std::async(std::launch::async, std::forward<Task>(task));
     while (future.wait_for(std::chrono::milliseconds(50)) != std::future_status::ready) {
         SDL_Event event;
@@ -385,6 +398,7 @@ bool RunWithProgressScreen(SDL_Window* window, ProgressSnapshot& snap, Task task
     DrawProgressScreen(window, renderer, snap);
     const bool ok = future.get();
     return ok;
+#endif
 }
 
 #ifdef TMC_OVERLAP_EXTRACT_INIT

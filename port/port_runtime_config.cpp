@@ -129,6 +129,33 @@ u64 FrameTimeForFps(u32 fps) {
 
 } 
 
+#ifdef __SWITCH__
+/* switch-sdl2 (SDL2) uses device-index semantics for opening controllers,
+ * unlike SDL3's instance-id model. The Switch presents Joy-Con/Pro/handheld
+ * as game controllers at stable device indices, so open by index and keep
+ * the handle in sPads for polling. Controllers are present at boot and stay,
+ * so add/remove churn is not tracked. */
+static SDL_Gamepad* OpenGamepad(int device_index) {
+    if (!SDL_IsGameController(device_index)) {
+        return nullptr;
+    }
+    SDL_Gamepad* pad = SDL_GameControllerOpen(device_index);
+    if (pad) {
+        for (SDL_Gamepad* p : sPads) {
+            if (p == pad) {
+                return pad; /* already open */
+            }
+        }
+        SDL_Log("Gamepad connected: %s", SDL_GameControllerName(pad));
+        sPads.push_back(pad);
+    }
+    return pad;
+}
+
+static void CloseGamepad(int which) {
+    (void)which; /* Switch controllers are stable; nothing to do. */
+}
+#else
 static SDL_Gamepad* OpenGamepad(SDL_JoystickID id) {
     for (SDL_Gamepad* pad : sPads) {
         if (SDL_GetGamepadID(pad) == id) {
@@ -157,6 +184,7 @@ static void CloseGamepad(SDL_JoystickID id) {
         }
     }
 }
+#endif
 
 extern "C" void Port_Config_Load(const char* path) {
     nlohmann::json j = DefaultsJson();
@@ -290,6 +318,17 @@ extern "C" void Port_Config_CycleTargetFps(int direction) {
  * lazily in Port_Config_InputPressed() so a controller that's plugged
  * in (or recognised by SDL) AFTER startup still gets picked up without
  * needing the GAMEPAD_ADDED event to flow through the poll loop. */
+#ifdef __SWITCH__
+static void Port_Config_RescanGamepads(bool verbose) {
+    int n = SDL_NumJoysticks();
+    if (verbose) {
+        SDL_Log("SDL joysticks found: %d", n);
+    }
+    for (int i = 0; i < n; i++) {
+        OpenGamepad(i); /* device index */
+    }
+}
+#else
 static void Port_Config_RescanGamepads(bool verbose) {
     int count = 0;
     SDL_JoystickID* ids = SDL_GetGamepads(&count);
@@ -301,6 +340,7 @@ static void Port_Config_RescanGamepads(bool verbose) {
     }
     SDL_free(ids);
 }
+#endif
 
 extern "C" void Port_Config_OpenGamepads(void) {
     /* Hint nudges to make SDL3 see more devices on Linux/wine where the
@@ -318,6 +358,36 @@ extern "C" void Port_Config_OpenGamepads(void) {
     Port_Config_RescanGamepads(true);
 }
 
+#ifdef __SWITCH__
+extern "C" void Port_Config_HandleEvent(const SDL_Event* e) {
+    /* SDL2 uses the c{device,button,axis} union members and has no keyboard
+     * on Switch. Game input is gamepad-only here. */
+    if (e->type == SDL_CONTROLLERDEVICEADDED) {
+        OpenGamepad(e->cdevice.which); /* device index for ADDED */
+    } else if (e->type == SDL_CONTROLLERBUTTONDOWN) {
+        for (size_t i = 0; i < PORT_INPUT_COUNT; i++) {
+            for (const Bind& b : sBinds[i]) {
+                if (b.pad >= 0 && b.pad < SDL_GAMEPAD_BUTTON_COUNT &&
+                    b.pad == (SDL_GamepadButton)e->cbutton.button) {
+                    sEdgePressed[i] = true;
+                    break;
+                }
+            }
+        }
+    } else if (e->type == SDL_CONTROLLERAXISMOTION &&
+               e->caxis.value > kAxisThreshold) {
+        for (size_t i = 0; i < PORT_INPUT_COUNT; i++) {
+            for (const Bind& b : sBinds[i]) {
+                if (b.axis >= 0 && b.axis < SDL_GAMEPAD_AXIS_COUNT &&
+                    b.axis == (SDL_GamepadAxis)e->caxis.axis) {
+                    sEdgePressed[i] = true;
+                    break;
+                }
+            }
+        }
+    }
+}
+#else
 extern "C" void Port_Config_HandleEvent(const SDL_Event* e) {
     if (e->type == SDL_EVENT_GAMEPAD_ADDED || e->type == SDL_EVENT_JOYSTICK_ADDED) {
         OpenGamepad(e->gdevice.which);
@@ -358,6 +428,7 @@ extern "C" void Port_Config_HandleEvent(const SDL_Event* e) {
         }
     }
 }
+#endif /* __SWITCH__ */
 
 extern "C" void Port_Config_ClearInputEdges(void) {
     sEdgePressed.fill(false);
@@ -383,7 +454,7 @@ extern "C" bool Port_Config_InputPressed(PortInput input) {
     }
 
     int count = 0;
-    const bool* keys = SDL_GetKeyboardState(&count);
+    const bool* keys = (const bool*)SDL_GetKeyboardState(&count);
     for (const Bind& b : sBinds[input]) {
         SDL_Scancode scan = b.key == SDLK_UNKNOWN ? SDL_SCANCODE_UNKNOWN : SDL_GetScancodeFromKey(b.key, nullptr);
         if (scan != SDL_SCANCODE_UNKNOWN && (int)scan < count && keys[scan]) {
