@@ -58,3 +58,12 @@ rm -rf "$DIST/assets"
 cp -r _extout/assets "$DIST/assets"
 cp _extout/sounds.json "$DIST/sounds.json"
 echo "Pre-baked cache staged in $DIST"
+
+# 5. Stage into the romfs dir so `make` bundles the cache INTO the .nro
+#    (self-contained build — user only supplies baserom.gba).
+ROMFS="platforms/switch/romfs"
+rm -rf "$ROMFS/assets"
+mkdir -p "$ROMFS/assets"
+cp -r _extout/assets/. "$ROMFS/assets/"
+cp _extout/sounds.json "$ROMFS/sounds.json"
+echo "Romfs cache staged in $ROMFS (rebuild the .nro to embed it)"

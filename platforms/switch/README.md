@@ -19,12 +19,14 @@ Then launch **tmc_switch** from the Homebrew Menu (hold R on a game, or Album).
 
 - Supported ROM names in `sdmc:/switch/tmc/`: `baserom.gba` (USA), `baserom_eu.gba`
   (EU), `tmc.gba`, `tmc_eu.gba`. This build is compiled for **USA**.
-- **The `dist/` package ships a PRE-BAKED asset cache** (`assets/*.pak` +
-  `.asset_build_state.json` with `rom_mtime=0`), generated on PC by the
-  standalone extractor. The Switch sees it as up-to-date and **skips the slow
-  on-device extraction entirely** — first boot is quick. (On-device extraction
-  is single-threaded because devkitA64 `std::thread` is unreliable, so it would
-  otherwise take many minutes and look frozen.)
+- **The asset cache is BUNDLED INSIDE the `.nro`** (in its embedded romfs),
+  pre-baked on PC by the standalone extractor. On first boot `switch_romfs.c`
+  copies it from `romfs:/assets` to `sdmc:/switch/tmc/assets` (one-time, a few
+  seconds) so the Switch **skips the slow on-device extraction entirely** — you
+  only need to supply `baserom.gba`. (On-device extraction is single-threaded
+  because devkitA64 `std::thread` is unreliable, so it would otherwise take many
+  minutes and look frozen.) Delete `sdmc:/switch/tmc/assets` to re-seed from the
+  `.nro` on the next launch.
 - Re-baking the cache: build the extractor and run it on the ROM —
   `bash platforms/switch/build_extractor.sh` (uses Docker `gcc` since there's no
   host C++ toolchain), then `--pak --runtime-only`, then set the recorded

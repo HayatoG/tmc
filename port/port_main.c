@@ -242,6 +242,18 @@ int main(int argc, char* argv[]) {
     freopen("tmc.log", "w", stderr);
     setvbuf(stderr, NULL, _IONBF, 0);
     fprintf(stderr, "=== TMC Switch boot log ===\n");
+
+    /* Mount the .nro's embedded romfs (which carries a pre-baked asset cache)
+     * and, on a fresh install, copy it to sdmc:/switch/tmc/assets so the user
+     * only needs to drop their baserom.gba here — no separate assets/ folder
+     * and no slow on-device extraction. Defined in switch_romfs.c (isolated
+     * from the game headers so <switch.h>'s u8/u32 don't clash). */
+    {
+        extern void Port_Switch_InitRomfs(void);
+        extern void Port_Switch_BootstrapAssetsFromRomfs(void);
+        Port_Switch_InitRomfs();
+        Port_Switch_BootstrapAssetsFromRomfs();
+    }
 #endif
 
     /* Must run before any std::vector / new / malloc that could land in
@@ -419,6 +431,15 @@ int main(int argc, char* argv[]) {
     }
 
     fprintf(stderr, "Port layer initialized. Entering AgbMain...\n");
+
+#ifdef __SWITCH__
+    /* Silence the per-frame gameplay debug traces ([disp]/[upi]/[fade-call]/
+     * [orch-*]) from here on: they fprintf(stderr) every frame, which would
+     * hammer the SD card and bloat tmc.log. The boot trace above is already
+     * flushed to tmc.log; gameplay stderr is discarded. */
+    fflush(stderr);
+    freopen("/dev/null", "w", stderr);
+#endif
 
     AgbMain();
 

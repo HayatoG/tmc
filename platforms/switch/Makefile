@@ -54,8 +54,14 @@ LDFLAGS := -specs=$(LIBNX)/switch.specs -g $(ARCH) -Wl,--gc-sections \
 # switch-sdl2 pulls in the Mesa/EGL stack + libnx (see sdl2-config --libs).
 LIBS := -lSDL2 -lpng -lz -lEGL -lglapi -ldrm_nouveau -lnx -lpthread -lm
 
-# Switch-only support sources (applet config, ViruaPPU patch-symbol stubs).
-SWITCH_SRCS := switch_stubs.c
+# Switch-only support sources (ViruaPPU patch-symbol stub, romfs bootstrap).
+SWITCH_SRCS := switch_stubs.c switch_romfs.c
+
+# Optional embedded romfs (pre-baked asset cache). Populated by
+# build_extractor.sh into ./romfs/. If present, elf2nro bundles it so the .nro
+# is self-contained and the user only needs to supply baserom.gba.
+ROMFS_DIR := romfs
+ROMFS_ARG := $(if $(wildcard $(ROMFS_DIR)/*),--romfsdir=$(ROMFS_DIR),)
 
 OBJS := $(addprefix $(BUILD)/, $(SWITCH_SRCS:.c=.o)) \
         $(addprefix $(BUILD)/, $(C_SOURCES:.c=.o)) \
@@ -78,8 +84,8 @@ $(TARGET).nacp:
 	@nacptool --create "$(APP_TITLE)" "$(APP_AUTHOR)" "$(APP_VERSION)" $@
 
 $(TARGET).nro: $(TARGET).elf $(TARGET).nacp
-	@echo "[elf2nro] $@"
-	@elf2nro $< $@ --nacp=$(TARGET).nacp --icon=$(APP_ICON)
+	@echo "[elf2nro] $@ $(if $(ROMFS_ARG),(+romfs),)"
+	@elf2nro $< $@ --nacp=$(TARGET).nacp --icon=$(APP_ICON) $(ROMFS_ARG)
 
 $(TARGET).elf: $(OBJS)
 	@echo "[link] $@"
