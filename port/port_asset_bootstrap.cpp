@@ -8,6 +8,15 @@
 
 #include <SDL3/SDL.h>
 
+#ifdef __SWITCH__
+/* libnx background runner (impl in platforms/switch/switch_parallel.c). */
+extern "C" {
+void* switch_bg_start(void (*fn)(void*), void* arg);
+int   switch_bg_done(void* h);
+void  switch_bg_join(void* h);
+}
+#endif
+
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -364,17 +373,37 @@ bool RunWithProgressScreen(SDL_Window* window, ProgressSnapshot& snap, Task task
     }
 
 #ifdef __SWITCH__
-    /* devkitA64's libstdc++ std::async/std::thread is unreliable — the worker
-     * crashes silently a few seconds in (observed as the progress bar freezing
-     * mid-extraction). Run the extraction synchronously on the main thread
-     * instead. The bar won't animate while it works, but it completes safely.
-     * (A libnx threadCreate-based animated version is a future improvement.) */
-    DrawProgressScreen(window, renderer, snap);
-    fprintf(stderr, "[ASSET] running extraction synchronously (Switch)\n");
-    const bool okSync = task();
-    fprintf(stderr, "[ASSET] extraction returned %d\n", (int)okSync);
-    DrawProgressScreen(window, renderer, snap);
-    return okSync;
+    /* Run the extraction on a libnx background thread (devkitA64's std::thread
+     * is unreliable) so the main thread keeps pumping the applet and animating
+     * the progress bar — the UI stays responsive instead of freezing. The
+     * extraction itself fans out across cores via switch_parallel_for.
+     * (switch_bg_* declared at file scope; impl in switch_parallel.c.)
+     * See platforms/switch/switch_parallel.c. */
+    struct TaskBox { Task* task; bool result; };
+    TaskBox box{ &task, false };
+    void* h = switch_bg_start(
+        [](void* p) { auto* b = static_cast<TaskBox*>(p); b->result = (*b->task)(); },
+        &box);
+
+    if (h == nullptr) {
+        /* Couldn't spawn — fall back to synchronous (UI blocks, but completes). */
+        DrawProgressScreen(window, renderer, snap);
+        const bool okSync = task();
+        DrawProgressScreen(window, renderer, snap);
+        return okSync;
+    }
+
+    while (!switch_bg_done(h)) {
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+            /* Keep extracting on QUIT so the install isn't left half-written. */
+        }
+        DrawProgressScreen(window, renderer, snap);
+        SDL_Delay(16); /* ~60 fps; don't busy-spin a core away from extraction */
+    }
+    switch_bg_join(h);
+    DrawProgressScreen(window, renderer, snap); /* final 100% */
+    return box.result;
 #else
     auto future = std::async(std::launch::async, std::forward<Task>(task));
     while (future.wait_for(std::chrono::milliseconds(50)) != std::future_status::ready) {

@@ -150,6 +150,11 @@ void EnsureDir(const std::filesystem::path& dir);
 // the same process (otherwise unused).
 void ResetEnsureDirCache();
 
+#ifdef __SWITCH__
+extern "C" void switch_parallel_for(std::size_t total, int nthreads,
+                                    void (*body)(void*, std::size_t), void* ctx);
+#endif
+
 template <typename Index, typename Fn>
 void ParallelFor(Index begin, Index end, Fn body)
 {
@@ -160,10 +165,10 @@ void ParallelFor(Index begin, Index end, Fn body)
 
     const std::size_t total = static_cast<std::size_t>(end - begin);
 #ifdef __SWITCH__
-    /* devkitA64's libstdc++ std::thread crashes silently a few seconds in
-     * (observed as the asset extraction freezing mid-way). Force the serial
-     * path on Switch — slower, but it actually completes. */
-    const std::size_t workers = 1;
+    /* devkitA64's libstdc++ std::thread crashes silently, so the std::thread
+     * path below is replaced by libnx threads (switch_parallel_for). Cap at 3
+     * workers — Application mode exposes cores 0-2 (core 3 is the OS). */
+    const std::size_t workers = std::min<std::size_t>(3, total);
 #else
     const std::size_t workers = std::min<std::size_t>(WorkerCount(), total);
 #endif
@@ -174,10 +179,32 @@ void ParallelFor(Index begin, Index end, Fn body)
         return;
     }
 
-    std::atomic<std::size_t> next{0};
     std::mutex error_mu;
     std::exception_ptr first_error;
 
+#ifdef __SWITCH__
+    /* libnx-thread parallel-for (declared at namespace scope above; impl in
+     * platforms/switch/switch_parallel.c). The per-index callback is a
+     * captureless lambda (-> function pointer); the try/catch stays on this
+     * side so no exception crosses the C boundary. */
+    struct PFCtx { Fn* body; Index begin; std::mutex* mu; std::exception_ptr* err; };
+    PFCtx ctx{ &body, begin, &error_mu, &first_error };
+    switch_parallel_for(
+        total, static_cast<int>(workers),
+        [](void* p, std::size_t i) {
+            auto* c = static_cast<PFCtx*>(p);
+            try {
+                (*c->body)(c->begin + static_cast<Index>(i));
+            } catch (...) {
+                std::lock_guard<std::mutex> lk(*c->mu);
+                if (!*c->err) {
+                    *c->err = std::current_exception();
+                }
+            }
+        },
+        &ctx);
+#else
+    std::atomic<std::size_t> next{0};
     auto worker = [&]() {
         try {
             for (;;) {
@@ -205,6 +232,7 @@ void ParallelFor(Index begin, Index end, Fn body)
     for (auto& th : threads) {
         th.join();
     }
+#endif
 
     if (first_error) {
         std::rethrow_exception(first_error);

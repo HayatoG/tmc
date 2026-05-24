@@ -54,8 +54,9 @@ LDFLAGS := -specs=$(LIBNX)/switch.specs -g $(ARCH) -Wl,--gc-sections \
 # switch-sdl2 pulls in the Mesa/EGL stack + libnx (see sdl2-config --libs).
 LIBS := -lSDL2 -lpng -lz -lEGL -lglapi -ldrm_nouveau -lnx -lpthread -lm
 
-# Switch-only support sources (ViruaPPU patch-symbol stub, romfs bootstrap).
-SWITCH_SRCS := switch_stubs.c switch_romfs.c
+# Switch-only support sources (ViruaPPU patch-symbol stub, romfs bootstrap,
+# libnx-thread parallel-for + background runner for on-device extraction).
+SWITCH_SRCS := switch_stubs.c switch_romfs.c switch_parallel.c
 
 # Optional embedded romfs (pre-baked asset cache). Populated by
 # build_extractor.sh into ./romfs/. If present, elf2nro bundles it so the .nro
