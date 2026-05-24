@@ -472,6 +472,13 @@ void InstallReporterCallback(ProgressSnapshot& snap) {
                 }
                 snap.last_phase_name = incoming;
                 snap.phase_name = incoming;
+#ifdef __SWITCH__
+                /* Trace phases to tmc.log (unbuffered) so a crash mid-extraction
+                 * pinpoints the phase. Runs under name_mu, so it's serialized. */
+                fprintf(stderr, "[ASSET] phase: %s (total=%zu)\n",
+                        incoming.c_str(), total);
+                fflush(stderr);
+#endif
             }
         });
 }
