@@ -67,10 +67,12 @@ void switch_parallel_for(size_t total, int nthreads,
     int extra = nthreads - 1; /* 1 or 2 */
     int started = 0;
     for (int i = 0; i < extra; i++) {
-        /* 512 KB stack; default user priority (0x2C); cores 1 and 2 so the
-         * caller (on its own core) + these gives up to 3 physical cores. */
+        /* 512 KB stack; LOW priority (0x3B, well below the main thread's 0x2C)
+         * so the main thread and OS always preempt these — keeps the progress
+         * bar, the HOME overlay, and sleep/power responsive during extraction.
+         * Cores 1 and 2 so the caller (its own core) + these = up to 3 cores. */
         Result rc = threadCreate(&th[i], pf_worker, &sh, NULL,
-                                 512 * 1024, 0x2C, i + 1);
+                                 512 * 1024, 0x3B, i + 1);
         if (R_FAILED(rc)) {
             break;
         }
@@ -116,8 +118,10 @@ void *switch_bg_start(void (*fn)(void *), void *arg) {
     b->arg = arg;
     b->done = 0;
     b->ok = 0;
-    /* 1 MB stack: this thread runs the whole extraction pipeline. cpuid 0. */
-    if (R_FAILED(threadCreate(&b->t, bg_entry, b, NULL, 1024 * 1024, 0x2C, 0))) {
+    /* 1 MB stack: runs the whole extraction pipeline. LOW priority (0x3B) so
+     * the main thread (0x2C) and the OS always win — UI/sleep stay responsive.
+     * cpuid 0. */
+    if (R_FAILED(threadCreate(&b->t, bg_entry, b, NULL, 1024 * 1024, 0x3B, 0))) {
         free(b);
         return NULL;
     }
