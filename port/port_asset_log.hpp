@@ -166,9 +166,10 @@ void ParallelFor(Index begin, Index end, Fn body)
     const std::size_t total = static_cast<std::size_t>(end - begin);
 #ifdef __SWITCH__
     /* devkitA64's libstdc++ std::thread crashes silently, so the std::thread
-     * path below is replaced by libnx threads (switch_parallel_for). Cap at 3
-     * workers — Application mode exposes cores 0-2 (core 3 is the OS). */
-    const std::size_t workers = std::min<std::size_t>(3, total);
+     * path below is replaced by libnx threads (switch_parallel_for). Cap at 2
+     * workers (cores 0-1): leaves a core free for the main thread + OS so the
+     * UI/sleep stay responsive during extraction. */
+    const std::size_t workers = std::min<std::size_t>(2, total);
 #else
     const std::size_t workers = std::min<std::size_t>(WorkerCount(), total);
 #endif

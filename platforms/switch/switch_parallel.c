@@ -50,7 +50,7 @@ void switch_parallel_for(size_t total, int nthreads,
         return;
     }
     if (nthreads < 1) nthreads = 1;
-    if (nthreads > 3) nthreads = 3;
+    if (nthreads > 2) nthreads = 2; /* leave a core free for the main thread + OS */
 
     pf_shared sh;
     sh.total = total;
@@ -72,7 +72,8 @@ void switch_parallel_for(size_t total, int nthreads,
          * crashed the console (the serial path ran on a 1 MB thread and was
          * fine). LOW priority (0x3B, below the main thread's 0x2C) so the main
          * thread and OS always preempt — keeps the bar/HOME/sleep responsive.
-         * Cores 1 and 2 so the caller (its own core) + these = up to 3 cores. */
+         * Core 1 (+ the caller on core 0) = 2 cores; core 2 stays free for the
+         * main thread and OS. */
         Result rc = threadCreate(&th[i], pf_worker, &sh, NULL,
                                  2 * 1024 * 1024, 0x3B, i + 1);
         if (R_FAILED(rc)) {
