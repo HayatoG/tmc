@@ -7,6 +7,18 @@ Targets **x86-64 Linux, Windows, and macOS** (Apple Silicon and Intel).
 The port is **work in progress** — many rendering and gameplay paths are still
 rough; please file issues for anything that breaks.
 
+## 🎮 Nintendo Switch port
+
+There is a native **Nintendo Switch** (libnx homebrew) build under
+[`platforms/switch/`](platforms/switch/) — runs on Atmosphère CFW; you just need
+the `.nro` + your ROM. Full guide:
+[English](platforms/switch/README.md) · [Português](platforms/switch/README.pt-BR.md).
+
+> Existe um build nativo para **Nintendo Switch** em
+> [`platforms/switch/`](platforms/switch/) — roda em CFW Atmosphère; basta o
+> `.nro` + sua ROM. Guia completo:
+> [English](platforms/switch/README.md) · [Português](platforms/switch/README.pt-BR.md).
+
 ## Supported ROMs
 
 A copy of the original game is required. This repository does **not** ship the
