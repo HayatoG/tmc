@@ -49,8 +49,11 @@ enum class PresentMode {
     Count
 };
 
-static const int kHiResW = 960;
-static const int kHiResH = 640;
+/* xBRZ hi-res buffers/texture must scale with MODE1_GBA_WIDTH: at a widescreen
+ * width (>240) the 4x upscale writes MODE1_GBA_WIDTH*4 px, which overflowed the
+ * old fixed 960x640 (=240*4) buffers and corrupted the whole frame + audio. */
+static const int kHiResW = MODE1_GBA_WIDTH * 4;
+static const int kHiResH = MODE1_GBA_HEIGHT * 4;
 
 static RenderBackend sBackend = RenderBackend::None;
 static SDL_Renderer* sRenderer = nullptr;
@@ -274,7 +277,7 @@ extern "C" void Port_PPU_Init(SDL_Window* window) {
             SDL_DestroyRenderer(sRenderer);
             sRenderer = nullptr;
         } else {
-            sUpscale2xBuf = (uint32_t*)std::malloc((size_t)480 * 320 * sizeof(uint32_t));
+            sUpscale2xBuf = (uint32_t*)std::malloc((size_t)(MODE1_GBA_WIDTH * 2) * (MODE1_GBA_HEIGHT * 2) * sizeof(uint32_t));
             sUpscale4xBuf = (uint32_t*)std::malloc((size_t)kHiResW * kHiResH * sizeof(uint32_t));
             sBackend = RenderBackend::Renderer;
         }
