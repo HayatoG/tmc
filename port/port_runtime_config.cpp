@@ -54,6 +54,7 @@ u8 sInternalScale = 1;
 std::string sUpscaleMethod = "nearest";
 u64 sFrameTimeNs = 0;
 bool sPortSettingsMenuEnabled = true;
+bool sShowFps = false;
 std::array<std::vector<Bind>, PORT_INPUT_COUNT> sBinds;
 /* Edge-detection cache. Set when the corresponding SDL key/button event
  * arrives during the frame; cleared by Port_Config_ClearInputEdges()
@@ -73,6 +74,7 @@ nlohmann::json DefaultsJson(void) {
         { "upscale_method", "nearest" },
         { "frame_time_ns", 0 },
         { "port_settings_menu", true },
+        { "show_fps", false },
         { "bindings", nlohmann::json::object() },
     };
     for (const auto& d : kDefaults) {
@@ -210,6 +212,7 @@ extern "C" void Port_Config_Load(const char* path) {
     sUpscaleMethod = j.value("upscale_method", "nearest");
     sFrameTimeNs = j.value("frame_time_ns", 0ULL);
     sPortSettingsMenuEnabled = j.value("port_settings_menu", true);
+    sShowFps = j.value("show_fps", false);
 
     for (auto& v : sBinds) {
         v.clear();
@@ -241,7 +244,25 @@ extern "C" u32 Port_Config_TargetFps(void) {
 }
 
 extern "C" bool Port_Config_PortSettingsMenuEnabled(void) {
+#ifdef __SWITCH__
+    /* On Switch the file-select "L Settings" GBA-native panel is replaced by
+     * the global L+R settings overlay (works on file-select, name entry AND
+     * in-game), so the in-game-only panel + its persistent hint are disabled
+     * here to avoid two competing settings UIs. */
+    return false;
+#else
     return sPortSettingsMenuEnabled;
+#endif
+}
+
+extern "C" bool Port_Config_ShowFps(void) {
+    return sShowFps;
+}
+
+extern "C" void Port_Config_ToggleShowFps(void) {
+    sShowFps = !sShowFps;
+    sConfigJson["show_fps"] = sShowFps;
+    SaveConfig();
 }
 
 extern "C" void Port_Config_SetWindowScale(u8 scale) {

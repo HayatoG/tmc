@@ -54,6 +54,8 @@ unsigned int  Port_Config_TargetFps(void);
 void          Port_Config_CycleTargetFps(int direction);
 unsigned char Port_Config_InternalScale(void);
 void          Port_Config_CycleInternalScale(int direction);
+bool          Port_Config_ShowFps(void);
+void          Port_Config_ToggleShowFps(void);
 
 /* Soft-slot equip-button assignments (port_softslots.c). */
 const char*   Port_SoftSlots_GetSlotLabel(int slot);
@@ -301,6 +303,10 @@ MenuPage BuildDisplaySettingsPage(void) {
     MenuPage p;
     p.title = "DISPLAY SETTINGS";
 
+#ifndef __SWITCH__
+    /* Window scale is a PC-only knob. On Switch the display is a fixed
+     * fullscreen framebuffer, so the "Scale" row instead drives internal
+     * render scale (supersampling) — see the internalScale item below. */
     MenuItem scale;
     scale.cycleLeft  = []() { Port_PPU_CycleWindowScale(-1); };
     scale.cycleRight = []() { Port_PPU_CycleWindowScale(+1); };
@@ -310,6 +316,7 @@ MenuPage BuildDisplaySettingsPage(void) {
         return std::string(buf);
     };
     p.items.push_back(std::move(scale));
+#endif
 
     MenuItem filter;
     filter.cycleLeft  = []() { Port_PPU_CyclePresentationMode(-1); };
@@ -348,6 +355,10 @@ MenuPage BuildDisplaySettingsPage(void) {
     };
     p.items.push_back(std::move(fps));
 
+#ifndef __SWITCH__
+    /* Fullscreen is a PC-only toggle. On Switch fullscreen is locked on (the
+     * display is a fixed framebuffer; toggling it off pushed the game into a
+     * corner of the TV), so the row is omitted there. */
     MenuItem fs;
     /* Fullscreen is binary, so left/right both toggle. */
     fs.cycleLeft  = []() { Port_PPU_ToggleFullscreen(); };
@@ -358,6 +369,7 @@ MenuPage BuildDisplaySettingsPage(void) {
         return std::string(buf);
     };
     p.items.push_back(std::move(fs));
+#endif
 
     MenuItem internalScale;
     internalScale.cycleLeft  = []() { Port_Config_CycleInternalScale(-1); };
@@ -365,15 +377,36 @@ MenuPage BuildDisplaySettingsPage(void) {
     internalScale.labelFn = []() {
         char buf[64];
         unsigned s = (unsigned)Port_Config_InternalScale();
+#ifdef __SWITCH__
+        /* On Switch this IS the "Scale" / quality knob (window scale is
+         * meaningless on a fixed fullscreen framebuffer). 1x = native,
+         * higher = sharper affine/rotation + better filter input. */
+        std::snprintf(buf, sizeof(buf),
+                      s == 1 ? "Scale       %ux  (native)"
+                             : "Scale       %ux  (supersampled)",
+                      s);
+#else
         /* Affine OAM is sub-pixel at scale > 1; everything else is S*S
          * replicate. Affine BG2 / mode 7 are still TODO. */
         std::snprintf(buf, sizeof(buf),
                       s == 1 ? "Internal    %ux  (off)"
                              : "Internal    %ux  (affine OBJ sub-pixel)",
                       s);
+#endif
         return std::string(buf);
     };
     p.items.push_back(std::move(internalScale));
+
+    MenuItem fpsCounter;
+    /* Binary toggle, so left/right both flip it. */
+    fpsCounter.cycleLeft  = []() { Port_Config_ToggleShowFps(); };
+    fpsCounter.cycleRight = []() { Port_Config_ToggleShowFps(); };
+    fpsCounter.labelFn = []() {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "FPS counter %s", Port_Config_ShowFps() ? "on" : "off");
+        return std::string(buf);
+    };
+    p.items.push_back(std::move(fpsCounter));
 
     p.items.push_back({ "<- Back", []() { Pop(); } });
     return p;
@@ -423,6 +456,19 @@ extern "C" void Port_DebugMenu_Toggle(void) {
         sPageStack.clear();
         sPageStack.push_back(BuildMainPage());
     }
+}
+
+/* Open the overlay directly on the display-settings page (no cheats/warps).
+ * Used by the Switch L+R shortcut so the quick-settings panel is reachable on
+ * the file-select, name-entry and in-game screens. Calling it while already
+ * open is a no-op so the L+R edge in the caller can treat "open" idempotently. */
+extern "C" void Port_DebugMenu_OpenSettings(void) {
+    if (sOpen) {
+        return;
+    }
+    sOpen = true;
+    sPageStack.clear();
+    sPageStack.push_back(BuildDisplaySettingsPage());
 }
 
 extern "C" bool Port_DebugMenu_IsOpen(void) {

@@ -35,6 +35,8 @@ const char* Port_Config_UpscaleMethod(void);
 u64 Port_Config_FrameTimeNs(void);
 u32 Port_Config_TargetFps(void);
 bool Port_Config_PortSettingsMenuEnabled(void);
+bool Port_Config_ShowFps(void);
+void Port_Config_ToggleShowFps(void);
 void Port_Config_SetWindowScale(u8 scale);
 void Port_Config_SetUpscaleMethod(const char* method);
 void Port_Config_SetTargetFps(u32 fps);

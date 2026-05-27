@@ -355,10 +355,30 @@ int main(int argc, char* argv[]) {
 
     SDL_Window* window = NULL;
     SDL_Renderer* prerenderer = NULL;
+#ifdef __SWITCH__
+    /* The Switch has a single fixed display (1280x720 handheld, 1920x1080
+     * docked). Create the window FULLSCREEN at the native handheld resolution
+     * so the renderer's output size matches the screen and the present path
+     * (Port_PPU_ComputeFitRect) fills it aspect-correct (pillarboxed) instead
+     * of rendering into a 240*window_scale sub-region. switch_applet.c bumps
+     * the size to 1080p on dock. The PC "window scale" concept does not apply
+     * here — creating at 240*scale left the game in a small corner of the TV.
+     * (Resizing post-creation via SDL_SetWindowSize did NOT fix it: switch-sdl2
+     * does not refresh the renderer output size on resize, so the window must
+     * be the right size at creation.) */
+    const int createW = 1280;
+    const int createH = 720;
+    const Uint32 createFlags = SDL_WINDOW_FULLSCREEN;
+    (void)window_scale;
+#else
+    const int createW = 240 * window_scale;
+    const int createH = 160 * window_scale;
+    const Uint32 createFlags = SDL_WINDOW_RESIZABLE;
+#endif
     if (!SDL_CreateWindowAndRenderer(
             "The Minish Cap",
-            240 * window_scale, 160 * window_scale,
-            SDL_WINDOW_RESIZABLE,
+            createW, createH,
+            createFlags,
             &window, &prerenderer)) {
         fprintf(stderr, "SDL_CreateWindowAndRenderer Error: %s\n", SDL_GetError());
         SDL_Quit();

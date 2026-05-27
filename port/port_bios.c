@@ -51,8 +51,72 @@ u64 DivAndModCombined(s32 num, s32 denom) {
     return ((u64)(u32)remainder << 32) | (u32)quotient;
 }
 
+#ifdef __SWITCH__
+/* Switch: the Minus (-) button opens/closes the global quick-settings overlay
+ * (the debug-menu display-settings page, which renders over file-select,
+ * name-entry and gameplay alike — there is no keyboard for the PC F8 shortcut).
+ * While it is open, D-pad/A/B are routed to the menu as SDL key events and the
+ * caller (Port_UpdateInput) masks game input. Button edges are derived from the
+ * polled pad state so one tap performs exactly one menu action.
+ *
+ * Returns true if game input should be masked this frame — i.e. the overlay is
+ * open OR the toggle fired this frame (so the closing Minus tap is not also
+ * delivered to the game as a GBA Select press). */
+static bool Port_Switch_SettingsOverlayTick(void) {
+    extern bool Port_DebugMenu_IsOpen(void);
+    extern bool Port_DebugMenu_HandleKey(int sdlKey);
+    extern void Port_DebugMenu_OpenSettings(void);
+
+    static const struct {
+        PortInput in;
+        int key;
+    } kNav[6] = {
+        { PORT_INPUT_UP, SDLK_UP },     { PORT_INPUT_DOWN, SDLK_DOWN },
+        { PORT_INPUT_LEFT, SDLK_LEFT }, { PORT_INPUT_RIGHT, SDLK_RIGHT },
+        { PORT_INPUT_A, SDLK_RETURN },  { PORT_INPUT_B, SDLK_ESCAPE },
+    };
+    static bool sTogglePrev = false;
+    static bool sNavPrev[6] = { false };
+
+    bool toggledThisFrame = false;
+    /* Minus (-) = PORT_INPUT_SELECT by default. One tap toggles the overlay. */
+    bool toggle = Port_Config_InputPressed(PORT_INPUT_SELECT);
+    if (toggle && !sTogglePrev) {
+        toggledThisFrame = true;
+        if (Port_DebugMenu_IsOpen()) {
+            Port_DebugMenu_HandleKey(SDLK_ESCAPE);
+        } else {
+            Port_DebugMenu_OpenSettings();
+        }
+    }
+    sTogglePrev = toggle;
+
+    if (Port_DebugMenu_IsOpen()) {
+        for (int i = 0; i < 6; i++) {
+            bool now = Port_Config_InputPressed(kNav[i].in);
+            if (now && !sNavPrev[i]) {
+                Port_DebugMenu_HandleKey(kNav[i].key);
+            }
+            sNavPrev[i] = now;
+        }
+    } else {
+        for (int i = 0; i < 6; i++) {
+            sNavPrev[i] = false;
+        }
+    }
+
+    return Port_DebugMenu_IsOpen() || toggledThisFrame;
+}
+#endif /* __SWITCH__ */
+
 static void Port_UpdateInput(void) {
     u16 keyinput = 0x03FF;
+
+#ifdef __SWITCH__
+    /* Drive the Minus (-) quick-settings overlay before the input mask below,
+     * so an open overlay (or the toggle tap this frame) suppresses game input. */
+    bool sw_overlay_mask = Port_Switch_SettingsOverlayTick();
+#endif
 
     {
         extern bool Port_DebugMenu_IsOpen(void);
@@ -60,9 +124,21 @@ static void Port_UpdateInput(void) {
          * the game doesn't observe stray input from key presses we routed
          * to the overlay. The soft-slot configuration overlay piggybacks
          * on this behaviour while it's the active focus. */
-        if (Port_DebugMenu_IsOpen() || Port_SoftSlots_ConfigIsOpen()) {
+        bool maskAll = Port_DebugMenu_IsOpen() || Port_SoftSlots_ConfigIsOpen();
+#ifdef __SWITCH__
+        maskAll = maskAll || sw_overlay_mask;
+#endif
+        if (maskAll) {
             *(vu16*)(gIoMem + REG_OFFSET_KEYINPUT) = keyinput;
             Port_SoftSlots_TickPause();
+            /* Clear the per-input edge cache every frame even on this masked
+             * early-return path. Without it the cache (set on button-down,
+             * only ever cleared here) stays latched while an overlay is open,
+             * so Port_Config_InputPressed() reports a button as held forever
+             * and the overlay's own edge detection (now && !prev) fires only
+             * once — that was why D-pad Down in the settings overlay needed
+             * many taps to move one row. */
+            Port_Config_ClearInputEdges();
             sFrameNum++;
             return;
         }
@@ -193,6 +269,13 @@ static void Port_PumpEvents(void) {
 static u64 lastFrameNs = 0;
 static u64 sFpsWindowStartNs = 0;
 static u32 sFpsFrameCount = 0;
+static double sCurrentFps = 0.0;
+
+/* Latest measured frame rate (updated once per second, same value shown in the
+ * window title on PC). Used by the on-screen FPS counter overlay on Switch. */
+double Port_GetCurrentFps(void) {
+    return sCurrentFps;
+}
 
 void VBlankIntrWait(void) {
     u64 nowNs;
@@ -251,6 +334,7 @@ void VBlankIntrWait(void) {
     if (nowNs - sFpsWindowStartNs >= 1000000000ULL) {
         double elapsedSec = (double)(nowNs - sFpsWindowStartNs) / 1000000000.0;
         double fps = (elapsedSec > 0.0) ? (double)sFpsFrameCount / elapsedSec : 0.0;
+        sCurrentFps = fps;
         char title[96];
 
 /* TMC_PORT_VERSION is set by xmake.lua's add_defines; the fallback below

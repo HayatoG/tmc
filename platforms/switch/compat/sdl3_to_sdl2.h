@@ -153,14 +153,20 @@ static inline bool sdl3compat_SetWindowSurfaceVSync(SDL_Window* w, int v) {
 }
 #define SDL_SetWindowSurfaceVSync sdl3compat_SetWindowSurfaceVSync
 
-/* Debug text overlay (debug menu only) — no SDL2 equivalent; no-op. */
+/* Debug text overlay: switch-sdl2 has no SDL_RenderDebugText, so we provide a
+ * real 8x8 bitmap-font renderer (compat/sdl3_debug_text.c) that draws in the
+ * renderer's current draw colour via SDL_RenderFillRect. Used by the in-game
+ * settings overlay + FPS counter. */
 #ifndef SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE
 #define SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE 8
 #endif
-static inline bool sdl3compat_RenderDebugText(SDL_Renderer* r, float x, float y,
-                                              const char* str) {
-    (void)r; (void)x; (void)y; (void)str; return true;
+#ifdef __cplusplus
+extern "C" {
+#endif
+bool sdl3compat_RenderDebugText(SDL_Renderer* r, float x, float y, const char* str);
+#ifdef __cplusplus
 }
+#endif
 #define SDL_RenderDebugText sdl3compat_RenderDebugText
 
 #endif /* __SWITCH__ */

@@ -324,6 +324,11 @@ extern "C" void Port_PPU_Init(SDL_Window* window) {
     }
 }
 
+/* On-screen FPS counter (toggled in the settings overlay). Port_GetCurrentFps
+ * lives in port_bios.c; Port_Config_ShowFps in port_runtime_config.cpp. */
+extern "C" double Port_GetCurrentFps(void);
+extern "C" bool Port_Config_ShowFps(void);
+
 extern "C" void Port_PPU_PresentFrame(void) {
     uint16_t dispcnt;
     uint8_t gbaMode;
@@ -470,6 +475,12 @@ extern "C" void Port_PPU_PresentFrame(void) {
             extern void Port_SoftSlots_RenderOverlay(void*, int, int);
             Port_SoftSlots_RenderOverlay(sRenderer, outW, outH);
         }
+        if (Port_Config_ShowFps()) {
+            char fpsBuf[24];
+            std::snprintf(fpsBuf, sizeof(fpsBuf), "%.0f FPS", Port_GetCurrentFps());
+            SDL_SetRenderDrawColor(sRenderer, 0, 255, 0, 255);
+            SDL_RenderDebugText(sRenderer, 8.0f, 8.0f, fpsBuf);
+        }
         SDL_RenderPresent(sRenderer);
         return;
     }
@@ -485,6 +496,12 @@ extern "C" void Port_PPU_SetWindowTitle(const char* title) {
 }
 
 extern "C" void Port_PPU_ToggleFullscreen(void) {
+#ifdef __SWITCH__
+    /* Fullscreen is locked on for the Switch — the display is a single fixed
+     * framebuffer. Toggling it off made SDL fall back to the small window size
+     * and pushed the game into a corner of the TV, so this is a no-op here. */
+    return;
+#else
     if (!sWindow) {
         return;
     }
@@ -492,6 +509,7 @@ extern "C" void Port_PPU_ToggleFullscreen(void) {
     bool wantFullscreen = (flags & SDL_WINDOW_FULLSCREEN) == 0;
     SDL_SetWindowFullscreen(sWindow, wantFullscreen);
     SDL_SyncWindow(sWindow);
+#endif
 }
 
 extern "C" bool Port_PPU_IsFullscreen(void) {
@@ -506,6 +524,14 @@ extern "C" unsigned char Port_PPU_WindowScale(void) {
 }
 
 extern "C" void Port_PPU_CycleWindowScale(int direction) {
+#ifdef __SWITCH__
+    /* No-op on Switch: the display is a fixed fullscreen framebuffer (handheld
+     * 720p / docked 1080p) and the present path already fills it aspect-correct.
+     * Resizing the SDL window here shrank the game into a corner of the TV, so
+     * the "Scale" row in the file-select L-settings panel does nothing here. */
+    (void)direction;
+    return;
+#else
     u8 scale = Port_Config_WindowScale();
     if (direction < 0) {
         scale = scale <= 1 ? 10 : (u8)(scale - 1);
@@ -517,6 +543,7 @@ extern "C" void Port_PPU_CycleWindowScale(int direction) {
         SDL_SetWindowSize(sWindow, MODE1_GBA_WIDTH * scale, MODE1_GBA_HEIGHT * scale);
         SDL_SyncWindow(sWindow);
     }
+#endif
 }
 
 extern "C" void Port_PPU_CyclePresentationMode(int direction) {

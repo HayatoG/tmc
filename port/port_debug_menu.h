@@ -12,6 +12,10 @@ struct SDL_Renderer;
 /* Toggle the debug menu overlay (typically bound to F8). */
 void Port_DebugMenu_Toggle(void);
 
+/* Open the overlay directly on the display-settings page (Switch L+R shortcut).
+ * No-op if already open. */
+void Port_DebugMenu_OpenSettings(void);
+
 /* True while the debug menu is on screen. While open, GBA input is masked
  * and key events are routed to the menu instead of the game. */
 bool Port_DebugMenu_IsOpen(void);
