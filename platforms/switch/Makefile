@@ -31,7 +31,11 @@ include sources.mk
 ARCH := -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -ftls-model=local-exec -fPIE
 
 DEFINES := -D__SWITCH__ -DPC_PORT -DNON_MATCHING -D$(GAME_VER) -DENGLISH -DREVISION=0 \
-           -DFMT_HEADER_ONLY=1 -DTMC_PC_VERSION=\"0.2.1.1\" -DTMC_PORT_VERSION=\"0.2.1.1\"
+           -DFMT_HEADER_ONLY=1 -DTMC_PC_VERSION=\"0.2.1.1\" -DTMC_PORT_VERSION=\"0.2.1.1\" \
+           -DMODE1_GBA_WIDTH=288
+# ^ widescreen EXPERIMENT (iteration 1): render 288px wide (~16:9). The engine
+# still only fills a 256px BG tilemap, so the right strip glitches until Half B
+# (512px tilemap + engine column fill) lands — see WIDESCREEN_PLAN.md.
 
 # Order matters: compat/ (SDL3->SDL2 redirect) BEFORE the SDL2 include dir.
 INCLUDES := -Icompat \
