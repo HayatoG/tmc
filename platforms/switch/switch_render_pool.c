@@ -18,6 +18,7 @@
 #include <stdatomic.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdio.h>
 
 /* Application mode exposes cores 0-2 (core 3 is reserved for the OS). We pin
  * workers to cores 1 and 2 and let the main render thread + the SDL audio
@@ -95,6 +96,18 @@ static void PoolInit(void) {
         }
     }
     sNumWorkers = spawned;
+
+    /* One-shot diagnostic: confirm how many workers actually spawned (a failed
+     * threadCreate would silently fall back to serial = no fps gain). cwd is
+     * sdmc:/switch/tmc (port_main chdir'd there before AgbMain). */
+    {
+        FILE *f = fopen("render_pool.log", "w");
+        if (f != NULL) {
+            fprintf(f, "render pool: %d worker(s) spawned + main thread = %d-way parallel\n",
+                    spawned, spawned + 1);
+            fclose(f);
+        }
+    }
 }
 
 void switch_render_pool_run(size_t total, void (*body)(void *, size_t), void *ctx) {

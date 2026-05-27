@@ -142,3 +142,81 @@ index fb6cbca..08fe39e 100644
      }
 +#endif
  }
+diff --git a/src/mode2.c b/src/mode2.c
+index 0b6daf7..b96aca9 100644
+--- a/src/mode2.c
++++ b/src/mode2.c
+@@ -5,21 +5,28 @@
+ #include "cpu/mode1.h"
+ #include "virtuappu.h"
+ 
+-void virtuappu_mode2_render_frame(const PPUMemory *ppu)
+-{
+-    static const int affine_sizes[4] = {128, 256, 512, 1024};
++#ifdef __SWITCH__
++/* Persistent libnx worker pool (platforms/switch/switch_render_pool.c). */
++extern void switch_render_pool_run(size_t total, void (*body)(void *, size_t), void *ctx);
++#endif
++
++/* mode2 (GBA mode 1/2: text BG0/BG1 + affine BG2 + OBJ) does NOT run the
++ * per-line HDMA callback, so io_mem is constant across the frame — every
++ * scanline reads the same registers. That makes the lines trivially
++ * independent (concurrent io READS are safe, no per-line snapshot needed), so
++ * the render loop body is hoisted into this per-line function and fanned out
++ * across the worker pool on Switch. dispcnt is read once and passed via ctx. */
++typedef struct {
+     uint16_t dispcnt;
+-    int line;
+-
+-    (void)ppu;
++} Mode2LineCtx;
+ 
+-    dispcnt = virtuappu_mode1_io_read16(MODE1_IO_DISPCNT);
+-    if ((dispcnt & MODE1_DISP_FORCED_BLANK) != 0u) {
+-        memset(virtuappu_frame_buffer, 0xFF, MODE1_GBA_WIDTH * MODE1_GBA_HEIGHT * sizeof(uint32_t));
+-        return;
+-    }
+-
+-    for (line = 0; line < MODE1_GBA_HEIGHT; ++line) {
++static void mode2_render_one_line(void *ctxp, size_t line_idx)
++{
++    static const int affine_sizes[4] = {128, 256, 512, 1024};
++    const Mode2LineCtx *c = (const Mode2LineCtx *)ctxp;
++    uint16_t dispcnt = c->dispcnt;
++    int line = (int)line_idx;
++    {
+         uint32_t bg_layers[MODE1_GBA_BG_COUNT][MODE1_GBA_WIDTH];
+         uint8_t bg_priority[MODE1_GBA_BG_COUNT][MODE1_GBA_WIDTH];
+         uint32_t obj_layer[MODE1_GBA_WIDTH];
+@@ -125,3 +132,31 @@ void virtuappu_mode2_render_frame(const PPUMemory *ppu)
+         virtuappu_mode1_composite_line(line, bg_layers, bg_priority, obj_layer, obj_priority, dispcnt);
+     }
+ }
++
++void virtuappu_mode2_render_frame(const PPUMemory *ppu)
++{
++    uint16_t dispcnt;
++    Mode2LineCtx ctx;
++
++    (void)ppu;
++
++    dispcnt = virtuappu_mode1_io_read16(MODE1_IO_DISPCNT);
++    if ((dispcnt & MODE1_DISP_FORCED_BLANK) != 0u) {
++        memset(virtuappu_frame_buffer, 0xFF, MODE1_GBA_WIDTH * MODE1_GBA_HEIGHT * sizeof(uint32_t));
++        return;
++    }
++
++    ctx.dispcnt = dispcnt;
++#ifdef __SWITCH__
++    /* io_mem is constant across the mode2 frame (no per-line callback), so the
++     * lines fan out across the worker pool with no snapshot needed. */
++    switch_render_pool_run((size_t)MODE1_GBA_HEIGHT, mode2_render_one_line, &ctx);
++#else
++    {
++        int line;
++        for (line = 0; line < MODE1_GBA_HEIGHT; ++line) {
++            mode2_render_one_line(&ctx, (size_t)line);
++        }
++    }
++#endif
++}
