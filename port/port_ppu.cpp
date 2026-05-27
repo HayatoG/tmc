@@ -20,6 +20,11 @@
  * platforms/switch/switch_stubs.c), so declare it here to keep the submodule
  * pristine and the fork buildable from a clean clone. */
 extern "C" void virtuappu_mode1_render_affine_obj_overlay(uint32_t* dst, int dst_w, int dst_h, int scale);
+
+/* Docked/handheld resolution helper lives in switch_applet.c (a C TU); declare
+ * it with C linkage at file scope — `extern "C"` is not a legal block-scope
+ * declaration, so it can't go inside Port_PPU_PresentFrame. */
+extern "C" void Port_Switch_AppletTick(int* outW, int* outH, int* resized);
 #endif
 
 /* Manual access to gMain (the engine's Main struct): including main.h
@@ -322,6 +327,20 @@ extern "C" void Port_PPU_Init(SDL_Window* window) {
 extern "C" void Port_PPU_PresentFrame(void) {
     uint16_t dispcnt;
     uint8_t gbaMode;
+
+#ifdef __SWITCH__
+    /* Pump the applet message loop once per frame (required for the operation
+     * mode to refresh) and resize the window on dock/undock so the present
+     * below renders at native handheld 720p / docked 1080p instead of letting
+     * the OS upscale. Lives in switch_applet.c (isolated from <switch.h>). */
+    {
+        int nw = 0, nh = 0, resized = 0;
+        Port_Switch_AppletTick(&nw, &nh, &resized);
+        if (resized && sWindow != nullptr) {
+            SDL_SetWindowSize(sWindow, nw, nh);
+        }
+    }
+#endif
 
     if (sBackend == RenderBackend::None) {
         return;
