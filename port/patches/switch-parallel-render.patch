@@ -1,5 +1,30 @@
+diff --git a/include/cpu/mode1.h b/include/cpu/mode1.h
+index 8e91619..ee14df0 100644
+--- a/include/cpu/mode1.h
++++ b/include/cpu/mode1.h
+@@ -12,8 +12,19 @@ extern "C" {
+ typedef void (*virtuappu_mode1_pre_line_fn)(int line);
+ extern virtuappu_mode1_pre_line_fn virtuappu_mode1_pre_line_callback;
+ 
++/* PORT_WIDESCREEN: MODE1_GBA_WIDTH is overridable via -DMODE1_GBA_WIDTH=N so the
++ * frame can render wider than the GBA-native 240 for real 16:9. The engine BG
++ * tilemap only holds reliable data in the 240-px viewport, so OAM is clipped at
++ * MODE1_GBA_VIEWPORT_X and BG composite at MODE1_GBA_BG_CLIP_X. Both stay 240
++ * until the engine is taught to fill the wider buffer (see WIDESCREEN_PLAN.md);
++ * at width=240 these equal MODE1_GBA_WIDTH so behaviour is unchanged. */
++#ifndef MODE1_GBA_WIDTH
++#define MODE1_GBA_WIDTH 240
++#endif
++#define MODE1_GBA_VIEWPORT_X 240
++#define MODE1_GBA_BG_CLIP_X  240
++
+ enum {
+-    MODE1_GBA_WIDTH = 240,
+     MODE1_GBA_HEIGHT = 160,
+     MODE1_GBA_BG_COUNT = 4,
+     MODE1_GBA_OAM_COUNT = 128,
 diff --git a/src/mode1.c b/src/mode1.c
-index fb6cbca..08fe39e 100644
+index fb6cbca..34d3bcd 100644
 --- a/src/mode1.c
 +++ b/src/mode1.c
 @@ -7,6 +7,18 @@
@@ -33,10 +58,30 @@ index fb6cbca..08fe39e 100644
  }
  
  uint32_t virtuappu_mode1_io_read32(uint16_t offset)
-@@ -684,6 +699,52 @@ void virtuappu_mode1_composite_line(
-     }
- }
+@@ -418,7 +433,7 @@ void virtuappu_mode1_render_obj_line(int line, bool obj_1d, uint32_t *line_buffe
+             uint8_t color_index;
+             uint16_t rgb555;
  
+-            if (screen_x < 0 || screen_x >= MODE1_GBA_WIDTH) {
++            if (screen_x < 0 || screen_x >= MODE1_GBA_VIEWPORT_X) {
+                 continue;
+             }
+ 
+@@ -680,8 +695,60 @@ void virtuappu_mode1_composite_line(
+             }
+         }
+ 
+-        virtuappu_frame_buffer[(size_t)line * MODE1_GBA_WIDTH + (size_t)x] = top_color;
++        if (x >= MODE1_GBA_BG_CLIP_X) {
++            /* Past the engine-loaded viewport: black until the engine fills the
++             * wider BG buffer (WIDESCREEN_PLAN.md Half B). No-op while width=240. */
++            virtuappu_frame_buffer[(size_t)line * MODE1_GBA_WIDTH + (size_t)x] = 0xFF000000u;
++        } else {
++            virtuappu_frame_buffer[(size_t)line * MODE1_GBA_WIDTH + (size_t)x] = top_color;
++        }
++    }
++}
++
 +/* Per-line render: independent (no shared mutable state) once the IO snapshot
 + * exists, so it can run on any worker thread. Reads its line's IO snapshot via
 + * the thread-local override. */
@@ -67,7 +112,7 @@ index fb6cbca..08fe39e 100644
 +    }
 +    if ((line_dispcnt & MODE1_DISP_BG1_ON) != 0u) {
 +        virtuappu_mode1_render_text_bg_line(1, line, bg_layers[1], bg_priority[1]);
-+    }
+     }
 +    if ((line_dispcnt & MODE1_DISP_BG2_ON) != 0u) {
 +        virtuappu_mode1_render_text_bg_line(2, line, bg_layers[2], bg_priority[2]);
 +    }
@@ -81,12 +126,10 @@ index fb6cbca..08fe39e 100644
 +    virtuappu_mode1_composite_line(line, bg_layers, bg_priority, obj_layer, obj_priority, line_dispcnt);
 +
 +    virtuappu_mode1_io_thread_override = prev_override;
-+}
-+
+ }
+ 
  void virtuappu_mode1_render_frame(const PPUMemory *ppu)
- {
-     uint16_t dispcnt;
-@@ -697,37 +758,28 @@ void virtuappu_mode1_render_frame(const PPUMemory *ppu)
+@@ -697,37 +764,28 @@ void virtuappu_mode1_render_frame(const PPUMemory *ppu)
          return;
      }
  
