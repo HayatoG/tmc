@@ -20,11 +20,14 @@
 #include <stdbool.h>
 #include <stdio.h>
 
-/* Application mode exposes cores 0-2 (core 3 is reserved for the OS). We pin
- * workers to cores 1 and 2 and let the main render thread + the SDL audio
- * callback share core 0. Two workers + the participating main thread = up to
- * 3-way parallelism over the 160 scanlines. */
-#define POOL_MAX_WORKERS 2
+/* Application mode exposes cores 0-2 (core 3 = OS). Use ONE worker (pinned to
+ * core 1) + the participating main thread (≈core 0) = 2-way parallelism, which
+ * leaves core 2 FREE for the SDL audio callback thread. Two workers (cores 1+2)
+ * starved that thread at the heavier widescreen render width and the audio
+ * crackled; and since the PPU scanline render is NOT the fps bottleneck (the
+ * single-threaded game logic is — see PERF_DOSSIER.md), dropping a worker costs
+ * essentially no fps while keeping audio glitch-free. */
+#define POOL_MAX_WORKERS 1
 
 static Thread sWorkers[POOL_MAX_WORKERS];
 static int sNumWorkers = -1; /* -1 = uninitialized, 0 = serial fallback */
