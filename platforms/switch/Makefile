@@ -58,7 +58,7 @@ LIBS := -lSDL2 -lpng -lz -lEGL -lglapi -ldrm_nouveau -lnx -lpthread -lm
 # libnx-thread parallel-for + background runner for on-device extraction,
 # applet lifecycle = docked resolution + HOME/sleep audio pause).
 SWITCH_SRCS := switch_stubs.c switch_romfs.c switch_parallel.c switch_applet.c \
-               compat/sdl3_debug_text.c
+               switch_render_pool.c compat/sdl3_debug_text.c
 
 # Optional embedded romfs (pre-baked asset cache). Populated by
 # build_extractor.sh into ./romfs/. If present, elf2nro bundles it so the .nro
