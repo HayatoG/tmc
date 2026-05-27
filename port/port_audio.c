@@ -185,7 +185,11 @@ bool Port_Audio_Init(void) {
     want.freq = PORT_AUDIO_SAMPLE_RATE;
     want.format = AUDIO_S16SYS;
     want.channels = PORT_AUDIO_CHANNELS;
-    want.samples = 1024;
+    /* 2048 (~43ms @ 48kHz) instead of 1024: a bigger device buffer rides out
+     * CPU-starvation hiccups (the software PPU render + game logic + audio mix
+     * are tight on the stock A57, especially at the widescreen render width),
+     * which caused crackle/slowdown. Costs a little latency, imperceptible here. */
+    want.samples = 2048;
     want.callback = Port_Audio_Feed;
     want.userdata = NULL;
 
