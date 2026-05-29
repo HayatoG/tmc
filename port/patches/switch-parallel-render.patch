@@ -1,8 +1,8 @@
 diff --git a/include/cpu/mode1.h b/include/cpu/mode1.h
-index 8e91619..ee14df0 100644
+index 8e91619..1ea3e3f 100644
 --- a/include/cpu/mode1.h
 +++ b/include/cpu/mode1.h
-@@ -12,8 +12,19 @@ extern "C" {
+@@ -12,8 +12,26 @@ extern "C" {
  typedef void (*virtuappu_mode1_pre_line_fn)(int line);
  extern virtuappu_mode1_pre_line_fn virtuappu_mode1_pre_line_callback;
  
@@ -15,8 +15,15 @@ index 8e91619..ee14df0 100644
 +#ifndef MODE1_GBA_WIDTH
 +#define MODE1_GBA_WIDTH 240
 +#endif
++/* OAM stays clipped at 240 to avoid leaking engine-parked off-screen sprites
++ * (which sit at x >= 240) into the widened view. */
 +#define MODE1_GBA_VIEWPORT_X 240
-+#define MODE1_GBA_BG_CLIP_X  240
++/* EXPERIMENT (widescreen iteration 1): render BG across the FULL width. With a
++ * width > 240 over the engine's 256-px (32-tile) tilemap, columns past ~256 wrap
++ * to the left edge, so the right strip glitches — that's the visible reminder
++ * that the engine must fill a 512-px (64-tile) BG buffer (WIDESCREEN_PLAN.md
++ * Half B). At width=240 this equals 240 so behaviour is unchanged. */
++#define MODE1_GBA_BG_CLIP_X  MODE1_GBA_WIDTH
 +
  enum {
 -    MODE1_GBA_WIDTH = 240,

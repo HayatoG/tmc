@@ -8,6 +8,23 @@
 - `Port_PPU_CycleWindowScale` is a no-op on Switch (window scale is meaningless on a
   fixed fullscreen framebuffer; it used to shrink the game into a corner).
 
+## Planned — Input: analog stick moves Link
+The left analog stick should move Link (8-way, like the D-pad). Today only the
+D-pad maps to the GBA D-pad and the stick does nothing — awkward to play. Map the
+SDL gamepad left-stick axes (SDL_GAMEPAD_AXIS_LEFTX / LEFTY) to the GBA DPAD_*
+directions in the input poll (port_runtime_config.cpp / port_bios.c), OR-combined
+with the D-pad, using a deadzone (~the existing kAxisThreshold). 8-way diagonals.
+
+## Known issue — audio crackle at the widescreen render width on STOCK clocks
+At 288px the software PPU + single-threaded game logic + audio mixing are CPU-bound
+on a stock Switch (an overclock of CPU/GPU/mem nearly removes the crackle → confirms
+CPU/memory-bandwidth starvation, not a logic bug). The game is light and should run
+native at stock. Mitigations applied: serial PPU render (POOL_MAX_WORKERS=0, frees
+cores 1-2 for the SDL audio thread) + 2048-sample audio buffer. If still tight at
+stock: try a narrower widescreen width, pin the audio thread to a dedicated core, or
+deeper game-logic/memory optimization. (Threading the render did NOT help fps — game
+logic is the bottleneck — so serial render is nearly free.)
+
 ## Planned — Real widescreen (16:9 fill, no stretching) — "Phase 2"
 
 ### Goal
