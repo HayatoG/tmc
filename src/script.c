@@ -205,6 +205,17 @@ ScriptExecutionContext* CreateScriptExecutionContext(void) {
 }
 
 void DestroyScriptExecutionContext(ScriptExecutionContext* context) {
+#ifdef PC_PORT
+    /* The PC port keeps script-context pointers in a side table
+     * (gEntityScriptCtxTable, port_entity_ctx.h). After a save-state restore an
+     * entity can carry ENT_SCRIPTED with its side-table slot already NULLed by
+     * a room transition, so UnloadCutsceneData calls in here with NULL. MemClear
+     * routes NULL through port_resolve_addr → memset(NULL,…) → Data Abort. Guard
+     * it (mirrors the NULL check gba_MemClear had on the original GBA path). */
+    if (context == NULL) {
+        return;
+    }
+#endif
     MemClear(context, sizeof(ScriptExecutionContext));
 }
 

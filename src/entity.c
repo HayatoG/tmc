@@ -459,7 +459,27 @@ void DeleteEntity(Entity* ent) {
         sub_08017744(ent);
         ReleaseTransitionManager(ent);
         UnloadCutsceneData(ent);
+#ifdef PC_PORT
+        /* Defense-in-depth for a corrupted save-state restore: only free
+         * hitbox/myHeap if they actually point into gzHeap. In NORMAL play this
+         * is behaviourally identical to the original — zFree already range-checks
+         * (ptr - gzHeap < 0x1000) and no-ops otherwise — but a restored entity
+         * could carry a pointer that isn't a real heap block, and clearing it
+         * here keeps the heap allocator's bookkeeping consistent. Note hitbox
+         * usually points at a STATIC table (gPlayerHitbox, definition hitboxes),
+         * not gzHeap; the range-check correctly treats those as "nothing to free". */
+        extern unsigned char gzHeap[];
+        if ((unsigned char*)ent->hitbox >= gzHeap && (unsigned char*)ent->hitbox < gzHeap + 0x1000) {
+            UnloadHitbox(ent);
+        } else {
+            ent->hitbox = NULL;
+        }
+        if (!((unsigned char*)ent->myHeap >= gzHeap && (unsigned char*)ent->myHeap < gzHeap + 0x1000)) {
+            ent->myHeap = NULL;
+        }
+#else
         UnloadHitbox(ent);
+#endif
         zFree(ent->myHeap);
         ent->myHeap = NULL;
         if (ent->kind == ENEMY) {
@@ -531,6 +551,15 @@ void DeleteAllEntities(void) {
     if (it->first) {
         do {
             for (ent = it->first; ent != NULL && (intptr_t)ent != (intptr_t)it; ent = next) {
+#ifdef PC_PORT
+                /* A node not inside a known entity/manager container is a stale
+                 * pointer from a restored save state (or other corruption).
+                 * Stop walking this list rather than dereferencing garbage —
+                 * the slots it would touch are already gone. */
+                if (!Port_EntityPtrIsValid(ent)) {
+                    break;
+                }
+#endif
                 next = ent->next;
                 DeleteEntityAny(ent);
             }
@@ -711,6 +740,17 @@ static void UnlinkEntity(Entity* ent) {
     if (ent == gUpdateContext.current_entity) {
         gUpdateContext.current_entity = ent->prev;
     }
+#ifdef PC_PORT
+    /* A save-state restore followed by a room transition can leave a list node
+     * whose prev/next is stale (points into a slot the reload reused). Writing
+     * through such a pointer is the save→load→cross-room crash. Guard the
+     * unlink: prev/next must be a real slot or a list sentinel. The sentinel
+     * (&gEntityLists[i]) is a valid write target (it's the list head), so allow
+     * pointers that are valid slots OR land inside the gEntityLists array. */
+    if (!Port_ListNodeOrHead(ent->prev) || !Port_ListNodeOrHead(ent->next)) {
+        return;
+    }
+#endif
     ent->prev->next = ent->next;
     ent->next->prev = ent->prev;
 }

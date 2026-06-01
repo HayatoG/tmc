@@ -81,6 +81,12 @@ u8 gUnk_02022830[0x1800] __attribute__((aligned(4))); /* u16[0xc00] on GBA; also
 u8 gUnk_02024048 = 0;                                 /* pending sound count (used by DrawEntity) */
 u8 gUnk_020246B0[0x1800] __attribute__((aligned(4))); /* u16[0xc00] scroll tilemap buffer */
 u8 gUnk_02033290[0x1000] __attribute__((aligned(8))); /* Manager pool: 32 Temp structs (128 bytes each on 64-bit) */
+
+/* Accessors for the manager pool — used by Port_EntityPtrIsValid
+ * (port_entity_ctx.h) to range-check entity-list nodes without re-declaring
+ * gUnk_02033290 (which has conflicting Manager/u8[] declarations elsewhere). */
+unsigned char* Port_ManagerPoolBase(void) { return gUnk_02033290; }
+unsigned long  Port_ManagerPoolSize(void) { return sizeof(gUnk_02033290); }
 u8 gUnk_020342F8[0x100] __attribute__((aligned(4)));  /* delayedEntityLoad array */
 u8 gUnk_02034330[0x20] __attribute__((aligned(4)));   /* struct_gUnk_02034330 (24 bytes) */
 struct_02034480 gUnk_02034480;
