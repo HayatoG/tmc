@@ -264,6 +264,15 @@ static std::vector<std::filesystem::path> AssetSearchRoots() {
 }
 
 std::optional<std::filesystem::path> FindEditableAssetsRoot() {
+#ifdef __SWITCH__
+    /* The editable (assets_src) tree is a PC/development artefact. On Switch we
+     * only ever consume the runtime .pak / ROM-extracted assets, never rebuild
+     * from assets_src — that rebuild walks thousands of loose files off the SD
+     * and hangs the console (it's also what a leftover/partial assets_src would
+     * wrongly trigger). Always report "no editable root" so the runtime path is
+     * used. */
+    return std::nullopt;
+#else
     for (const auto& root : AssetSearchRoots()) {
         const std::filesystem::path candidate = root / "assets_src";
         if (std::filesystem::exists(candidate / "gfx_groups.json") &&
@@ -273,6 +282,7 @@ std::optional<std::filesystem::path> FindEditableAssetsRoot() {
         }
     }
     return std::nullopt;
+#endif
 }
 
 std::optional<std::filesystem::path> FindRuntimeAssetsRoot() {
