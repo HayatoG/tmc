@@ -61,6 +61,12 @@ struct Config
      * still written loose so the engine can parse them at startup
      * without paying mmap/Lookup cost on tiny files. */
     bool packRuntime{false};
+    /* When true, do NOT write the editable (outputRoot / assets_src) tree at
+     * all. The caller is going to delete it anyway (runtime_only), so writing
+     * ~10k loose files just to remove_all() them is pure wasted SD I/O — that
+     * was the on-device extraction's dominant cost (issue #16). Only the
+     * runtime assets (.pak in pack mode) are produced. */
+    bool skipEditable{false};
     /* Pointer rather than embedded value so Config stays trivially
      * copyable for the existing call sites and so the lifetime is
      * controlled by the caller (typically main, which constructs a
@@ -1258,7 +1264,8 @@ inline bool extract_all_tilemaps(const Config& config)
         }
 
         const std::filesystem::path raw_relative = std::filesystem::path("tilemaps") / record.source_path;
-        if (!write_binary_file(config.outputRoot / raw_relative, tilemap_data.data(), tilemap_data.size())) {
+        if (!config.skipEditable &&
+            !write_binary_file(config.outputRoot / raw_relative, tilemap_data.data(), tilemap_data.size())) {
             if (reporter.Verbose()) {
                 reporter.Warn(fmt::format("failed to write tilemap {}", raw_relative.generic_string()));
             }
@@ -1266,8 +1273,8 @@ inline bool extract_all_tilemaps(const Config& config)
             return;
         }
         if (!config.runtimeOutputRoot.empty()) {
-            write_runtime_asset(config, config.outputRoot / raw_relative, raw_relative,
-                                tilemap_data.data(), tilemap_data.size());
+            write_runtime_asset(config, config.skipEditable ? std::filesystem::path{} : config.outputRoot / raw_relative,
+                                raw_relative, tilemap_data.data(), tilemap_data.size());
         }
 
         nlohmann::json json_tilemap;
@@ -1281,10 +1288,16 @@ inline bool extract_all_tilemaps(const Config& config)
             if (lz77_uncompress(tilemap_data, decompressed_data)) {
                 std::filesystem::path decompressed_relative = raw_relative;
                 decompressed_relative.replace_extension("");
-                if (write_binary_file(config.outputRoot / decompressed_relative, decompressed_data.data(),
-                                      decompressed_data.size())) {
+                const bool wrote_editable =
+                    !config.skipEditable &&
+                    write_binary_file(config.outputRoot / decompressed_relative, decompressed_data.data(),
+                                      decompressed_data.size());
+                if (wrote_editable || config.skipEditable) {
                     if (!config.runtimeOutputRoot.empty()) {
-                        write_runtime_asset(config, config.outputRoot / decompressed_relative, decompressed_relative,
+                        write_runtime_asset(config,
+                                            config.skipEditable ? std::filesystem::path{}
+                                                                : config.outputRoot / decompressed_relative,
+                                            decompressed_relative,
                                             decompressed_data.data(), decompressed_data.size());
                     }
                     json_tilemap["decompressed_file"] = json_path_string(decompressed_relative);
@@ -1426,7 +1439,12 @@ inline std::filesystem::path extract_asset_or_raw(uint32_t rom_offset, uint32_t 
 
     const std::span<const uint8_t> data = extract_bytes(rom_offset, size);
     const std::filesystem::path editable_path = output_root / relative_path;
-    write_binary_file(editable_path, data.data(), data.size());
+    /* Skip the editable write when the caller will discard the editable tree
+     * (on-device runtime_only) — see Config::skipEditable / issue #16. */
+    const bool skip_editable = active_pak_config != nullptr && active_pak_config->skipEditable;
+    if (!skip_editable) {
+        write_binary_file(editable_path, data.data(), data.size());
+    }
     g_consumed_editable().Mark(relative_path);
     if (!runtime_output_root.empty()) {
         if (active_pak_config != nullptr && active_pak_config->packRuntime &&
@@ -1436,7 +1454,13 @@ inline std::filesystem::path extract_asset_or_raw(uint32_t rom_offset, uint32_t 
             const auto idx = static_cast<std::size_t>(pak_route_for(rel));
             (*builders)[idx].Add(rel, data.data(), data.size());
         } else {
-            mirror_to_runtime(editable_path, runtime_output_root / relative_path, data.data(), data.size());
+            /* Non-pak fallback needs the editable file to hardlink from; if we
+             * skipped it, write the runtime copy directly instead. */
+            if (skip_editable) {
+                write_binary_file(runtime_output_root / relative_path, data.data(), data.size());
+            } else {
+                mirror_to_runtime(editable_path, runtime_output_root / relative_path, data.data(), data.size());
+            }
         }
         g_consumed_runtime().Mark(relative_path);
     }
@@ -2358,7 +2382,11 @@ inline bool extract_assets(const Config& config)
         const std::filesystem::path entry_path = entry.path;
         const std::string entry_path_str = entry_path.generic_string();
 
-        const bool need_editable = !g_consumed_editable().Contains(entry_path);
+        /* skipEditable (on-device runtime_only): never write the editable copy
+         * — it would just be remove_all()'d afterwards. This drops the ~10k SD
+         * writes this sweep otherwise does (issue #16). */
+        const bool need_editable = !config.skipEditable &&
+                                   !g_consumed_editable().Contains(entry_path);
         const bool need_runtime = !config.runtimeOutputRoot.empty() &&
                                   is_runtime_passthrough_path(entry_path_str) &&
                                   !g_consumed_runtime().Contains(entry_path);

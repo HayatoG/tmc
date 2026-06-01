@@ -306,6 +306,11 @@ bool ExtractAssets(const Options& opt, std::string* error)
     config.variant = "USA";
     config.outputRoot = opt.editable_root;
     config.runtimeOutputRoot = opt.runtime_root;
+    /* runtime_only deletes the editable tree afterwards, so don't write it at
+     * all — skips ~10k loose SD writes on-device (issue #16). Only safe to skip
+     * when packing the runtime: the non-pak path hardlinks runtime from the
+     * editable copy. */
+    config.skipEditable = opt.runtime_only && opt.pack_runtime;
 
     WipeStaleRuntime(opt.runtime_root, opt.pack_runtime);
 
