@@ -20,21 +20,35 @@ pure CPU → framebuffer, no GPU translation is needed.
 
 You need a Switch with **Atmosphère** CFW and the Homebrew Menu.
 
-1. On your SD card, create the folder `sdmc:/switch/tmc/` and put **two files** in it:
+### 1. Copy two files to your SD card
 
-   ```
-   sdmc:/switch/tmc/
-     ├── tmc_switch.nro     ← the homebrew (asset cache is bundled inside it)
-     └── baserom.gba        ← your own USA ROM (sha1 b4bd50e4131b027c334547b4524e2dbbd4227130)
-   ```
+Create the folder `sdmc:/switch/tmc/` and put **both** of these in it:
 
-2. Open the Homebrew Menu — **hold `R` while launching any game** to get full
-   memory (recommended), or open it from Album.
-3. Launch **The Minish Cap**.
+```
+sdmc:/switch/tmc/
+  ├── tmc_switch.nro     ← the homebrew (asset cache is bundled inside it)
+  └── <your USA ROM>.gba ← your own copy of the game
+```
 
-**Accepted ROM names** in `sdmc:/switch/tmc/` (this build is **USA**):
-`baserom.gba` or `tmc.gba` (USA), `baserom_eu.gba` or `tmc_eu.gba` (EU). Rename
-your ROM to one of these.
+- The ROM must be the **USA** version of The Minish Cap
+  (sha1 `b4bd50e4131b027c334547b4524e2dbbd4227130`).
+- **The filename does not matter** — drop your `.gba` in with any name. The port
+  identifies the right ROM by its contents, so `baserom.gba`, `tmc.gba`, or
+  `Zelda Minish Cap.gba` all work. (Older builds required the exact name
+  `baserom.gba`; that's no longer the case.)
+
+### 2. Launch it with **full memory**
+
+The port needs **Application-mode memory** — it will **not** run as a library
+applet. So you must open the Homebrew Menu the "full memory" way:
+
+- **Hold `R` while launching any installed game** to enter the Homebrew Menu, **or**
+- Use an **NSP forwarder** (see [Home-screen forwarder](#-home-screen-forwarder-optional) below).
+
+> Opening homebrew from the **Album** runs it as an applet with limited memory —
+> the game will fail to start that way. Use the hold-`R` method or a forwarder.
+
+Then launch **The Minish Cap** from the menu.
 
 **First launch** takes a few extra seconds (one time): it extracts ROM pages and
 seeds the bundled asset cache to the SD. Every launch after that is fast. Saves,

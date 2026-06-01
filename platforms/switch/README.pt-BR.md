@@ -20,21 +20,35 @@ há nenhuma tradução de GPU envolvida.
 
 Você precisa de um Switch com CFW **Atmosphère** e o Homebrew Menu.
 
-1. No SD, crie a pasta `sdmc:/switch/tmc/` e coloque **dois arquivos** nela:
+### 1. Copie dois arquivos para o SD
 
-   ```
-   sdmc:/switch/tmc/
-     ├── tmc_switch.nro     ← o homebrew (o cache de assets vem embutido nele)
-     └── baserom.gba        ← sua ROM USA (sha1 b4bd50e4131b027c334547b4524e2dbbd4227130)
-   ```
+Crie a pasta `sdmc:/switch/tmc/` e coloque **os dois** nela:
 
-2. Abra o Homebrew Menu — **segure `R` ao abrir qualquer jogo** para ter memória
-   total (recomendado), ou abra pelo Álbum.
-3. Abra **The Minish Cap**.
+```
+sdmc:/switch/tmc/
+  ├── tmc_switch.nro      ← o homebrew (o cache de assets vem embutido nele)
+  └── <sua ROM USA>.gba   ← sua própria cópia do jogo
+```
 
-**Nomes de ROM aceitos** em `sdmc:/switch/tmc/` (este build é **USA**):
-`baserom.gba` ou `tmc.gba` (USA), `baserom_eu.gba` ou `tmc_eu.gba` (EU). Renomeie
-sua ROM para um desses.
+- A ROM precisa ser a versão **USA** do The Minish Cap
+  (sha1 `b4bd50e4131b027c334547b4524e2dbbd4227130`).
+- **O nome do arquivo não importa** — basta soltar seu `.gba` com qualquer nome.
+  O port identifica a ROM correta pelo conteúdo, então `baserom.gba`, `tmc.gba`
+  ou `Zelda Minish Cap.gba` funcionam igual. (Builds antigos exigiam o nome
+  exato `baserom.gba`; isso não é mais necessário.)
+
+### 2. Inicie com **memória total**
+
+O port precisa de **memória em modo Aplicativo** — ele **não** roda como library
+applet. Então abra o Homebrew Menu pelo caminho de "memória total":
+
+- **Segure `R` ao abrir qualquer jogo instalado** para entrar no Homebrew Menu, **ou**
+- Use um **forwarder NSP** (veja [Forwarder na tela inicial](#-forwarder-na-tela-inicial-opcional) abaixo).
+
+> Abrir o homebrew pelo **Álbum** o executa como applet, com memória limitada — o
+> jogo não vai iniciar assim. Use o método de segurar `R` ou um forwarder.
+
+Depois, abra **The Minish Cap** pelo menu.
 
 **A primeira execução** leva alguns segundos a mais (só uma vez): ela extrai as
 páginas da ROM e copia o cache de assets embutido para o SD. Depois disso, toda

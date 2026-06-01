@@ -130,3 +130,5 @@ platforms/switch/build*.rc
 platforms/switch/romfs/
 platforms/switch/icon_preview.png
 _icon_test_gray.png
+rom/
+*.7z
