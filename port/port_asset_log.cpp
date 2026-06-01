@@ -367,9 +367,49 @@ BackgroundWriter& BackgroundWriter::Instance()
     return instance;
 }
 
+/* Serialize one task's JSON and write it to disk. Shared by the threaded
+ * worker (other platforms) and the synchronous Submit path (Switch). On error
+ * it records first_error_ exactly like the worker loop did. */
+void BackgroundWriter::WriteTask(Task& task)
+{
+    static constexpr std::streamsize kBuf = 256 * 1024;
+    static thread_local std::vector<char> file_buf(static_cast<std::size_t>(kBuf));
+    try {
+        EnsureDir(task.path.parent_path());
+        std::string serialized =
+            task.indent > 0 ? task.json.dump(task.indent) : task.json.dump();
+        std::ofstream f;
+        f.rdbuf()->pubsetbuf(file_buf.data(), kBuf);
+        f.open(task.path, std::ios::binary);
+        if (!f) {
+            throw std::runtime_error(
+                fmt::format("BackgroundWriter: failed to open {} for writing",
+                            task.path.string()));
+        }
+        f.write(serialized.data(), static_cast<std::streamsize>(serialized.size()));
+        f.flush();
+        if (!f) {
+            throw std::runtime_error(
+                fmt::format("BackgroundWriter: failed to write {}", task.path.string()));
+        }
+    } catch (...) {
+        std::lock_guard<std::mutex> lk(mutex_);
+        if (!first_error_) {
+            first_error_ = std::current_exception();
+        }
+    }
+}
+
 BackgroundWriter::BackgroundWriter()
 {
+#ifndef __SWITCH__
+    /* On Switch, devkitA64's std::thread dies silently a few seconds in (see
+     * platforms/switch/switch_parallel.c), which deadlocked the asset
+     * extraction at the first Submit (the "areas" phase): the worker never
+     * drained the queue, so Wait() blocked forever. There we write
+     * synchronously in Submit() instead — no background thread at all. */
     worker_ = std::thread(&BackgroundWriter::WorkerMain, this);
+#endif
 }
 
 BackgroundWriter::~BackgroundWriter()
@@ -380,18 +420,28 @@ BackgroundWriter::~BackgroundWriter()
 void BackgroundWriter::Submit(std::filesystem::path output_path, nlohmann::json json, int indent)
 {
     Task task{std::move(output_path), std::move(json), indent};
+#ifdef __SWITCH__
+    /* Synchronous write — no worker thread on Switch. */
+    WriteTask(task);
+#else
     {
         std::lock_guard<std::mutex> lk(mutex_);
         queue_.push_back(std::move(task));
         ++in_flight_;
     }
     cv_.notify_one();
+#endif
 }
 
 void BackgroundWriter::Wait()
 {
     std::unique_lock<std::mutex> lk(mutex_);
+#ifndef __SWITCH__
+    /* Block until the worker has drained the queue. On Switch there is no
+     * worker — Submit() already wrote everything synchronously, so in_flight_
+     * is always 0; we just re-check the error below. */
     drain_cv_.wait(lk, [this]() { return in_flight_ == 0; });
+#endif
     if (first_error_) {
         std::exception_ptr err = first_error_;
         first_error_ = nullptr;
@@ -416,13 +466,6 @@ void BackgroundWriter::Shutdown()
 
 void BackgroundWriter::WorkerMain()
 {
-    /* Buffer matches the inline write_text_buffered helper in the
-     * extractor — fat enough to coalesce multi-MB JSON dumps into a
-     * handful of write() syscalls. Reused across tasks; vector keeps
-     * the allocation alive for the lifetime of the worker. */
-    static constexpr std::streamsize kBuf = 256 * 1024;
-    std::vector<char> file_buf(static_cast<std::size_t>(kBuf));
-
     for (;;) {
         Task task;
         {
@@ -438,30 +481,7 @@ void BackgroundWriter::WorkerMain()
             queue_.erase(queue_.begin());
         }
 
-        try {
-            EnsureDir(task.path.parent_path());
-            std::string serialized =
-                task.indent > 0 ? task.json.dump(task.indent) : task.json.dump();
-            std::ofstream f;
-            f.rdbuf()->pubsetbuf(file_buf.data(), kBuf);
-            f.open(task.path, std::ios::binary);
-            if (!f) {
-                throw std::runtime_error(
-                    fmt::format("BackgroundWriter: failed to open {} for writing",
-                                task.path.string()));
-            }
-            f.write(serialized.data(), static_cast<std::streamsize>(serialized.size()));
-            f.flush();
-            if (!f) {
-                throw std::runtime_error(
-                    fmt::format("BackgroundWriter: failed to write {}", task.path.string()));
-            }
-        } catch (...) {
-            std::lock_guard<std::mutex> lk(mutex_);
-            if (!first_error_) {
-                first_error_ = std::current_exception();
-            }
-        }
+        WriteTask(task); /* serialize + write; records first_error_ on failure */
 
         {
             std::lock_guard<std::mutex> lk(mutex_);

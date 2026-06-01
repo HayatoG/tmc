@@ -131,6 +131,9 @@ class BackgroundWriter
     void WorkerMain();
 
     struct Task;
+    /* Serialize + write one task's JSON to disk (shared by the worker thread
+     * and the synchronous Switch path). Records first_error_ on failure. */
+    void WriteTask(Task& task);
     std::mutex mutex_;
     std::condition_variable cv_;
     std::condition_variable drain_cv_;

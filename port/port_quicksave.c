@@ -60,9 +60,24 @@ static StateRegion sRegions[] = {
 
 #define NUM_REGIONS (sizeof(sRegions) / sizeof(sRegions[0]))
 
-static u8* sSnapshot = NULL;
-static size_t sSnapshotBytes = 0;
-static int sSnapshotValid = 0;
+/* Multi-slot snapshots. Each slot is an independent in-memory snapshot of
+ * the regions above. Slot 0 is the legacy F5/F6 quicksave slot, so the old
+ * Port_QuickSave()/Port_QuickLoad() entry points still work unchanged.
+ *
+ * These live in process memory only — they are NOT persisted to disk, so a
+ * snapshot is lost when the game exits. (Disk persistence is a separate,
+ * riskier change: several captured regions — gEntities, gPlayerEntity,
+ * gMain, gRoomControls — hold host pointers that would not survive being
+ * reloaded into a fresh process. See port_quicksave.h.) */
+#define PORT_QUICKSAVE_SLOTS 8
+
+typedef struct {
+    u8*    data;
+    size_t bytes;
+    int    valid;
+} Slot;
+
+static Slot sSlots[PORT_QUICKSAVE_SLOTS];
 
 static size_t TotalRegionBytes(void) {
     size_t total = 0;
@@ -72,49 +87,72 @@ static size_t TotalRegionBytes(void) {
     return total;
 }
 
-int Port_QuickSave(void) {
+int Port_QuickSave_Slot(int slot) {
+    if (slot < 0 || slot >= PORT_QUICKSAVE_SLOTS) {
+        return 0;
+    }
+    Slot* s = &sSlots[slot];
     size_t total = TotalRegionBytes();
-    if (sSnapshot == NULL) {
-        sSnapshot = (u8*)malloc(total);
-        if (sSnapshot == NULL) {
-            fprintf(stderr, "[quicksave] failed to allocate %zu bytes\n", total);
+    if (s->data == NULL || s->bytes != total) {
+        free(s->data);
+        s->data = (u8*)malloc(total);
+        if (s->data == NULL) {
+            s->bytes = 0;
+            s->valid = 0;
+            fprintf(stderr, "[quicksave] slot %d: failed to allocate %zu bytes\n", slot, total);
             return 0;
         }
-        sSnapshotBytes = total;
-    } else if (sSnapshotBytes != total) {
-        /* Region list changed between calls — should not happen. */
-        free(sSnapshot);
-        sSnapshot = (u8*)malloc(total);
-        if (sSnapshot == NULL) {
-            sSnapshotBytes = 0;
-            return 0;
-        }
-        sSnapshotBytes = total;
+        s->bytes = total;
     }
 
-    u8* dst = sSnapshot;
+    u8* dst = s->data;
     for (size_t i = 0; i < NUM_REGIONS; i++) {
         memcpy(dst, sRegions[i].ptr, sRegions[i].size);
         dst += sRegions[i].size;
     }
-    sSnapshotValid = 1;
-    fprintf(stderr, "[quicksave] saved %zu bytes\n", total);
+    s->valid = 1;
+    fprintf(stderr, "[quicksave] slot %d: saved %zu bytes\n", slot, total);
     return 1;
 }
 
-int Port_QuickLoad(void) {
-    if (!sSnapshotValid || sSnapshot == NULL) {
+int Port_QuickLoad_Slot(int slot) {
+    if (slot < 0 || slot >= PORT_QUICKSAVE_SLOTS) {
         return 0;
     }
-    const u8* src = sSnapshot;
+    Slot* s = &sSlots[slot];
+    if (!s->valid || s->data == NULL) {
+        return 0;
+    }
+    const u8* src = s->data;
     for (size_t i = 0; i < NUM_REGIONS; i++) {
         memcpy(sRegions[i].ptr, src, sRegions[i].size);
         src += sRegions[i].size;
     }
-    fprintf(stderr, "[quicksave] restored %zu bytes\n", sSnapshotBytes);
+    fprintf(stderr, "[quicksave] slot %d: restored %zu bytes\n", slot, s->bytes);
     return 1;
 }
 
+int Port_QuickSave_SlotHasSnapshot(int slot) {
+    if (slot < 0 || slot >= PORT_QUICKSAVE_SLOTS) {
+        return 0;
+    }
+    return sSlots[slot].valid;
+}
+
+int Port_QuickSave_SlotCount(void) {
+    return PORT_QUICKSAVE_SLOTS;
+}
+
+/* ---- Legacy F5/F6 single-slot API (slot 0) ------------------------------ */
+
+int Port_QuickSave(void) {
+    return Port_QuickSave_Slot(0);
+}
+
+int Port_QuickLoad(void) {
+    return Port_QuickLoad_Slot(0);
+}
+
 int Port_QuickSave_HasSnapshot(void) {
-    return sSnapshotValid;
+    return Port_QuickSave_SlotHasSnapshot(0);
 }

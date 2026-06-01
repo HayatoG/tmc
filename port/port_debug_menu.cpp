@@ -60,6 +60,14 @@ void          Port_Config_ToggleShowFps(void);
 /* Soft-slot equip-button assignments (port_softslots.c). */
 const char*   Port_SoftSlots_GetSlotLabel(int slot);
 void          Port_SoftSlots_CycleAssignment(int slot, int direction);
+
+/* Multi-slot save states (port_quicksave.c). In-memory only — see that
+ * file's header. Drives the "Save states" menu page so save/load is
+ * reachable with a gamepad (the Switch has no F5/F6 keys). */
+int           Port_QuickSave_Slot(int slot);
+int           Port_QuickLoad_Slot(int slot);
+int           Port_QuickSave_SlotHasSnapshot(int slot);
+int           Port_QuickSave_SlotCount(void);
 }
 
 namespace {
@@ -133,6 +141,7 @@ MenuPage BuildAllAreasPage(void);
 MenuPage BuildAreaRoomsPage(unsigned char area);
 MenuPage BuildDisplaySettingsPage(void);
 MenuPage BuildSoftSlotsPage(void);
+MenuPage BuildSaveStatesPage(void);
 MenuPage BuildMainPage(void);
 
 void Push(MenuPage page) {
@@ -408,6 +417,12 @@ MenuPage BuildDisplaySettingsPage(void) {
     };
     p.items.push_back(std::move(fpsCounter));
 
+    /* Save states — Enter opens the slot overview. Lives here (not only on
+     * the F8 main page) because on Switch the Minus button opens *this* page
+     * via Port_DebugMenu_OpenSettings(), and the Switch has no F5/F6 keys, so
+     * this is the only way to reach save/load with a gamepad. */
+    p.items.push_back({ "Save states  >", []() { Push(BuildSaveStatesPage()); } });
+
     p.items.push_back({ "<- Back", []() { Pop(); } });
     return p;
 }
@@ -429,12 +444,80 @@ MenuPage BuildSoftSlotsPage(void) {
     return p;
 }
 
+/* Per-slot save-state page. One Enter to save, one to load — the extra
+ * step (vs. the row itself triggering an action) is the guard against a
+ * stray gamepad press clobbering or overwriting the live game. */
+MenuPage BuildSaveStateSlotPage(int slot) {
+    MenuPage p;
+    char title[32];
+    std::snprintf(title, sizeof(title), "SAVE STATE - SLOT %d", slot + 1);
+    p.title = title;
+
+    p.items.push_back({ "Salvar neste slot", [slot]() {
+        if (Port_QuickSave_Slot(slot)) {
+            char buf[48];
+            std::snprintf(buf, sizeof(buf), "Slot %d salvo", slot + 1);
+            Toast(buf);
+        } else {
+            Toast("Falha ao salvar");
+        }
+    } });
+
+    MenuItem load;
+    load.action = [slot]() {
+        if (!Port_QuickSave_SlotHasSnapshot(slot)) {
+            Toast("Slot vazio");
+            return;
+        }
+        if (Port_QuickLoad_Slot(slot)) {
+            char buf[48];
+            std::snprintf(buf, sizeof(buf), "Slot %d carregado", slot + 1);
+            Toast(buf);
+        } else {
+            Toast("Falha ao carregar");
+        }
+    };
+    load.labelFn = [slot]() {
+        return std::string(Port_QuickSave_SlotHasSnapshot(slot)
+                               ? "Carregar deste slot"
+                               : "Carregar deste slot (vazio)");
+    };
+    p.items.push_back(std::move(load));
+
+    p.items.push_back({ "<- Voltar", []() { Pop(); } });
+    return p;
+}
+
+/* Save-states overview — one row per slot showing empty/occupied, so the
+ * player can see at a glance where to save and where to load. Reachable on
+ * Switch (no F5/F6 keys) because it is linked from the display-settings page
+ * that L+R opens, as well as from the PC F8 main page. */
+MenuPage BuildSaveStatesPage(void) {
+    MenuPage p;
+    p.title = "SAVE STATES";
+    int count = Port_QuickSave_SlotCount();
+    for (int s = 0; s < count; ++s) {
+        MenuItem it;
+        it.action = [s]() { Push(BuildSaveStateSlotPage(s)); };
+        it.labelFn = [s]() {
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "Slot %d: %s", s + 1,
+                          Port_QuickSave_SlotHasSnapshot(s) ? "ocupado" : "vazio");
+            return std::string(buf);
+        };
+        p.items.push_back(std::move(it));
+    }
+    p.items.push_back({ "<- Voltar", []() { Pop(); } });
+    return p;
+}
+
 MenuPage BuildMainPage(void) {
     MenuPage p;
     p.title = "DEBUG MENU (F8 to close)";
     p.items.push_back({ "Items / progress",  []() { Push(BuildItemsPage()); } });
     p.items.push_back({ "Warp",              []() { Push(BuildWarpPage());  } });
     p.items.push_back({ "Display settings",  []() { Push(BuildDisplaySettingsPage()); } });
+    p.items.push_back({ "Save states",       []() { Push(BuildSaveStatesPage()); } });
     p.items.push_back({ "Extra equip slots", []() { Push(BuildSoftSlotsPage()); } });
     p.items.push_back({ "Heal to full",      []() { Port_DebugAction_HealFull(); Toast("Healed"); } });
     p.items.push_back({ "Close menu",        []() { Pop(); } });
@@ -693,5 +776,5 @@ extern "C" void Port_DebugMenu_Render(SDL_Renderer* renderer, int winW, int winH
     SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
     SDL_RenderDebugText(renderer, box.x + 8.0f, y, "Up/Dn move  PgUp/PgDn page  Home/End ends");
     y += charW + 4.0f;
-    SDL_RenderDebugText(renderer, box.x + 8.0f, y, "Enter select  L/R cycle  Esc back  F5/F6 save/load");
+    SDL_RenderDebugText(renderer, box.x + 8.0f, y, "Enter select  L/R cycle  Esc back  (save: Save states)");
 }
