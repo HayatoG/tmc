@@ -798,9 +798,105 @@ static int GetExeDir(char* out, size_t n) {
 #endif
 }
 
+/* A Minish Cap ROM is identified by its 4-char game code at header offset
+ * 0xAC: BZME=USA, BZMP=EU, BZMJ=JP. We accept any file whose code matches a
+ * known Minish Cap region, regardless of filename — this is what lets the
+ * user drop a correctly-dumped ROM under any name (issue #14). Returns 1 and
+ * fills `code` (4 bytes) if `path` looks like a Minish Cap ROM. */
+static int RomFileGameCode(const char* path, char code[4]) {
+    FILE* f = fopen(path, "rb");
+    if (!f)
+        return 0;
+    char hdr[4] = { 0 };
+    int ok = 0;
+    if (fseek(f, 0xAC, SEEK_SET) == 0 && fread(hdr, 1, 4, f) == 4) {
+        ok = 1;
+    }
+    fclose(f);
+    if (!ok)
+        return 0;
+    if (code) {
+        memcpy(code, hdr, 4);
+    }
+    return 1;
+}
+
+static int IsMinishCapRom(const char* path) {
+    char code[4];
+    if (!RomFileGameCode(path, code))
+        return 0;
+    return memcmp(code, "BZME", 4) == 0 || /* USA */
+           memcmp(code, "BZMP", 4) == 0 || /* EU  */
+           memcmp(code, "BZMJ", 4) == 0;   /* JP  */
+}
+
+/* True if `name` ends in ".gba" (case-insensitive). */
+static int HasGbaExtension(const char* name) {
+    size_t len = strlen(name);
+    if (len < 4)
+        return 0;
+    const char* ext = name + len - 4;
+    return ext[0] == '.' &&
+           (ext[1] == 'g' || ext[1] == 'G') &&
+           (ext[2] == 'b' || ext[2] == 'B') &&
+           (ext[3] == 'a' || ext[3] == 'A');
+}
+
+/* If `dir/name` is a *.gba Minish Cap ROM, open it and fill foundPath. */
+static FILE* TryRomCandidate(const char* dir, const char* name,
+                             char* foundPath, int foundPathLen) {
+    if (!HasGbaExtension(name))
+        return NULL;
+    char path[4096 + 256];
+    snprintf(path, sizeof(path), "%s/%s", dir, name);
+    if (!IsMinishCapRom(path))
+        return NULL;
+    FILE* f = fopen(path, "rb");
+    if (f && foundPath)
+        snprintf(foundPath, foundPathLen, "%s", path);
+    return f;
+}
+
+/* Scan a directory for any *.gba whose header marks it as a Minish Cap ROM.
+ * Returns an open handle (and fills foundPath) for the first match, else NULL.
+ * This is the "filename doesn't matter, content does" path (issue #14).
+ * Split Win32 / POSIX the same way LoadExtractedPagesFrom does. */
+static FILE* ScanDirForRom(const char* dir, char* foundPath, int foundPathLen) {
+    if (!dir || !dir[0])
+        return NULL;
+#ifdef _WIN32
+    char pattern[4096 + 16];
+    snprintf(pattern, sizeof(pattern), "%s\\*.gba", dir);
+    WIN32_FIND_DATAA fd;
+    HANDLE hFind = FindFirstFileA(pattern, &fd);
+    if (hFind == INVALID_HANDLE_VALUE)
+        return NULL;
+    FILE* result = NULL;
+    do {
+        result = TryRomCandidate(dir, fd.cFileName, foundPath, foundPathLen);
+    } while (result == NULL && FindNextFileA(hFind, &fd));
+    FindClose(hFind);
+    return result;
+#else
+    DIR* d = opendir(dir);
+    if (!d)
+        return NULL;
+    FILE* result = NULL;
+    struct dirent* e;
+    while ((e = readdir(d)) != NULL) {
+        result = TryRomCandidate(dir, e->d_name, foundPath, foundPathLen);
+        if (result)
+            break;
+    }
+    closedir(d);
+    return result;
+#endif
+}
+
 static FILE* TryOpenRom(const char** paths, int count, char* foundPath, int foundPathLen) {
     /* Pass 1: exe_dir/<basename> for any candidate that's a bare filename. */
     char exeDir[4096];
+    exeDir[0] = '\0'; /* so Pass 3 can fall back to "." if GetExeDir fails */
     if (GetExeDir(exeDir, sizeof(exeDir))) {
         for (int i = 0; i < count; i++) {
             const char* p = paths[i];
@@ -830,6 +926,24 @@ static FILE* TryOpenRom(const char** paths, int count, char* foundPath, int foun
                 snprintf(foundPath, foundPathLen, "%s", paths[i]);
             return f;
         }
+    }
+
+    /* Pass 3: filename doesn't matter, content does (issue #14). Scan the
+     * directories where a user would realistically drop a ROM for ANY *.gba
+     * whose header marks it as a Minish Cap ROM. Order mirrors passes 1-2:
+     * the binary's own dir, the cwd, and (Switch) the SD-card install dir. */
+    {
+        FILE* f = ScanDirForRom(exeDir[0] ? exeDir : ".", foundPath, foundPathLen);
+        if (f)
+            return f;
+        f = ScanDirForRom(".", foundPath, foundPathLen);
+        if (f)
+            return f;
+#ifdef __SWITCH__
+        f = ScanDirForRom("/switch/tmc", foundPath, foundPathLen);
+        if (f)
+            return f;
+#endif
     }
     return NULL;
 }
