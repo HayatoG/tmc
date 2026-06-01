@@ -103,7 +103,9 @@ static void PoolInit(void) {
 
     /* One-shot diagnostic: confirm how many workers actually spawned (a failed
      * threadCreate would silently fall back to serial = no fps gain). cwd is
-     * sdmc:/switch/tmc (port_main chdir'd there before AgbMain). */
+     * sdmc:/switch/tmc (port_main chdir'd there before AgbMain). Debug build
+     * only — release (TMC_RELEASE) skips the SD write. */
+#ifndef TMC_RELEASE
     {
         FILE *f = fopen("render_pool.log", "w");
         if (f != NULL) {
@@ -112,6 +114,7 @@ static void PoolInit(void) {
             fclose(f);
         }
     }
+#endif
 }
 
 void switch_render_pool_run(size_t total, void (*body)(void *, size_t), void *ctx) {

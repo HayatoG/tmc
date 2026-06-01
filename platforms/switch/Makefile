@@ -26,6 +26,14 @@ BUILD    := build
 TARGET   := tmc_switch
 GAME_VER := USA
 
+# Build flavour: RELEASE=0 (default) is the debug build — writes tmc.log /
+# applet.log / render_pool.log to the SD and keeps -g debug symbols. RELEASE=1
+# is the GitHub/distribution build — defines TMC_RELEASE so all SD logging is
+# compiled out (less SD wear, no per-frame I/O) and drops -g (smaller .nro).
+#   make            -> debug   (logs on)
+#   make RELEASE=1  -> release (logs off, stripped)
+RELEASE ?= 0
+
 include sources.mk
 
 ARCH := -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -ftls-model=local-exec -fPIE
@@ -33,6 +41,14 @@ ARCH := -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -ftls-model=local-
 DEFINES := -D__SWITCH__ -DPC_PORT -DNON_MATCHING -D$(GAME_VER) -DENGLISH -DREVISION=0 \
            -DFMT_HEADER_ONLY=1 -DTMC_PC_VERSION=\"0.2.1.1\" -DTMC_PORT_VERSION=\"0.2.1.1\" \
            -DMODE1_GBA_WIDTH=288
+
+# Release flavour: define TMC_RELEASE (gates SD logging in the C/C++ sources).
+ifeq ($(RELEASE),1)
+DEFINES += -DTMC_RELEASE
+DEBUGFLAG :=
+else
+DEBUGFLAG := -g
+endif
 # ^ widescreen EXPERIMENT (iteration 1): render 288px wide (~16:9). The engine
 # still only fills a 256px BG tilemap, so the right strip glitches until Half B
 # (512px tilemap + engine column fill) lands — see WIDESCREEN_PLAN.md.
@@ -48,12 +64,12 @@ INCLUDES := -Icompat \
 
 WARN := -Wall -Wno-unknown-pragmas -Wno-unused -Wno-format
 
-CFLAGS   := -g -O2 -ffunction-sections -fdata-sections $(ARCH) $(DEFINES) $(INCLUDES) $(WARN) -D_REENTRANT
+CFLAGS   := $(DEBUGFLAG) -O2 -ffunction-sections -fdata-sections $(ARCH) $(DEFINES) $(INCLUDES) $(WARN) -D_REENTRANT
 CFLAGS   += -std=gnu11
-CXXFLAGS := -g -O2 -ffunction-sections -fdata-sections $(ARCH) $(DEFINES) $(INCLUDES) $(WARN) -D_REENTRANT
+CXXFLAGS := $(DEBUGFLAG) -O2 -ffunction-sections -fdata-sections $(ARCH) $(DEFINES) $(INCLUDES) $(WARN) -D_REENTRANT
 CXXFLAGS += -std=gnu++20
 
-LDFLAGS := -specs=$(LIBNX)/switch.specs -g $(ARCH) -Wl,--gc-sections \
+LDFLAGS := -specs=$(LIBNX)/switch.specs $(DEBUGFLAG) $(ARCH) -Wl,--gc-sections \
            -L$(PORTLIBS)/lib -L$(LIBNX)/lib
 # switch-sdl2 pulls in the Mesa/EGL stack + libnx (see sdl2-config --libs).
 LIBS := -lSDL2 -lpng -lz -lEGL -lglapi -ldrm_nouveau -lnx -lpthread -lm

@@ -352,6 +352,51 @@ void DrawProgressScreen(SDL_Window* window, SDL_Renderer* renderer,
              barY + barHeight + 1.5f * scale, footerScale,
              {160, 175, 195, 255});
 
+    /* TTY-style scrolling log of completed phases (Linux-boot feel). When the
+     * phase name changes, stamp the just-finished phase as a "[ok]" line. The
+     * log persists across the per-frame redraws via function-local statics; it
+     * is reset when a brand-new extraction starts (phase history empties at the
+     * first "preparing"/empty snapshot). */
+    {
+        /* Extraction runs once per boot, so a function-local history is fine —
+         * it accumulates the phases seen this run and is never reused. */
+        static std::vector<std::string> sLog;
+        static std::string sPrevPhase;
+
+        if (phaseName != sPrevPhase) {
+            if (!sPrevPhase.empty() && sPrevPhase != "preparing") {
+                /* Record the phase that just finished, with its file count.
+                 * The 5x7 font is uppercase-only and has no '[' ']' glyphs, so
+                 * use "OK:" (O, K and ':' are all in the table). */
+                char line[96];
+                std::snprintf(line, sizeof(line), "OK:  %-16s %zu",
+                              sPrevPhase.c_str(), total);
+                sLog.emplace_back(line);
+            }
+            sPrevPhase = phaseName;
+        }
+
+        /* Render the log below the bar: completed phases (dim green) then the
+         * current one (bright, with a trailing "..."). Keep only the last few
+         * lines so it never runs off the bottom. */
+        const float logScale = std::max(1.0f, scale * 0.55f);
+        const float lineH = (5.0f + 2.0f) * logScale; /* 5px glyph + 2px gap */
+        float logY = barY + barHeight + 5.0f * scale;
+        const float logX = barX;
+
+        const int maxLines = 8;
+        int first = (int)sLog.size() > maxLines ? (int)sLog.size() - maxLines : 0;
+        for (int i = first; i < (int)sLog.size(); ++i) {
+            DrawText(renderer, sLog[i], logX, logY, logScale, {110, 170, 120, 255});
+            logY += lineH;
+        }
+        /* Active phase line. */
+        if (snap.running.load(std::memory_order_acquire)) {
+            std::string cur = std::string("....  ") + phaseName + " ...";
+            DrawText(renderer, cur, logX, logY, logScale, {200, 220, 180, 255});
+        }
+    }
+
     SDL_RenderPresent(renderer);
 }
 

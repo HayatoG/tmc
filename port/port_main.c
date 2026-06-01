@@ -238,10 +238,16 @@ int main(int argc, char* argv[]) {
     chdir("/switch/tmc");
     /* Capture all the port's fprintf(stderr,...) boot tracing to a file on
      * the SD. Unbuffered so a hard freeze still leaves the last line on disk
-     * — read sdmc:/switch/tmc/tmc.log to see exactly where a hang happened. */
+     * — read sdmc:/switch/tmc/tmc.log to see exactly where a hang happened.
+     * Release builds (TMC_RELEASE) skip the file entirely and send stderr to
+     * /dev/null so there's no SD writes / I/O cost. */
+#ifdef TMC_RELEASE
+    freopen("/dev/null", "w", stderr);
+#else
     freopen("tmc.log", "w", stderr);
     setvbuf(stderr, NULL, _IONBF, 0);
     fprintf(stderr, "=== TMC Switch boot log ===\n");
+#endif
 
     /* Mount the .nro's embedded romfs (which carries a pre-baked asset cache)
      * and, on a fresh install, copy it to sdmc:/switch/tmc/assets so the user

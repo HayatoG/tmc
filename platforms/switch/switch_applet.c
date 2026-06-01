@@ -28,6 +28,9 @@
 static FILE* sLog = NULL;
 
 static void alog(const char* fmt, ...) {
+#ifdef TMC_RELEASE
+    (void)fmt; /* release build: no SD logging */
+#else
     if (sLog == NULL) {
         sLog = fopen("applet.log", "w");
         if (sLog == NULL) {
@@ -39,6 +42,7 @@ static void alog(const char* fmt, ...) {
     va_start(ap, fmt);
     vfprintf(sLog, fmt, ap);
     va_end(ap);
+#endif
 }
 
 /*
@@ -66,4 +70,28 @@ void Port_Switch_AppletTick(int* outW, int* outH, int* resized) {
         *outH = h;
         *resized = 1;
     }
+}
+
+/* Console system language → overlay UI language code: 0 = English,
+ * 1 = Português, 2 = Español. Used as the default on first run (the user can
+ * still override it in the settings overlay). Returns 0 on any error so English
+ * is the safe fallback. */
+int Port_Switch_SystemLanguage(void) {
+    int result = 0; /* English */
+    if (R_SUCCEEDED(setInitialize())) {
+        u64 langCode = 0;
+        SetLanguage lang = SetLanguage_ENUS;
+        if (R_SUCCEEDED(setGetSystemLanguage(&langCode)) &&
+            R_SUCCEEDED(setMakeLanguage(langCode, &lang))) {
+            /* SetLanguage_PT = European Portuguese; SetLanguage_PTBR =
+             * Brazilian Portuguese [10.1.0+]. Match both. */
+            if (lang == SetLanguage_PT || lang == SetLanguage_PTBR) {
+                result = 1; /* Português */
+            } else if (lang == SetLanguage_ES) {
+                result = 2; /* Español */
+            }
+        }
+        setExit();
+    }
+    return result;
 }
