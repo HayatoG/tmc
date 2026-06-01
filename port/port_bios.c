@@ -150,6 +150,17 @@ static void Port_UpdateInput(void) {
         }
     }
 
+    /* Left analog stick -> D-pad (8 directions), OR-combined with the physical
+     * D-pad above so the stick is purely additive. Mapping the stick to Link's
+     * movement makes the port feel natural on a Switch controller. */
+    {
+        int stick = Port_Config_AnalogDPad();
+        if (stick & PORT_DPAD_RIGHT) keyinput &= ~DPAD_RIGHT;
+        if (stick & PORT_DPAD_LEFT)  keyinput &= ~DPAD_LEFT;
+        if (stick & PORT_DPAD_UP)    keyinput &= ~DPAD_UP;
+        if (stick & PORT_DPAD_DOWN)  keyinput &= ~DPAD_DOWN;
+    }
+
     /* Soft-slots (X / Y / L2 / R2): when one is held with an item
      * assigned, force GBA B_BUTTON pressed so the engine spawns the
      * soft-slot's item via the regular B-dispatch path. The override of
@@ -290,6 +301,16 @@ void VBlankIntrWait(void) {
         u32 targetFps = Port_Config_TargetFps();
         bool wantVsync = !sFastForward && targetFps != 0 && targetFps <= 60;
         Port_PPU_SetVSync(wantVsync);
+    }
+
+    /* Apply any pending save-state load here, at the frame boundary — the
+     * previous frame's game logic has fully returned and the next has not
+     * started, so swapping the entity graph (gEntities/gEntityLists/gzHeap…)
+     * is atomic. Doing it inline from the menu mid-frame corrupted the list
+     * walk and crashed in DeleteAllEntities. */
+    {
+        extern void Port_QuickSave_TickPendingLoad(void);
+        Port_QuickSave_TickPendingLoad();
     }
 
     Port_PPU_PresentFrame();

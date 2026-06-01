@@ -37,6 +37,22 @@ u32 Port_Config_TargetFps(void);
 bool Port_Config_PortSettingsMenuEnabled(void);
 bool Port_Config_ShowFps(void);
 void Port_Config_ToggleShowFps(void);
+
+/* FPS counter placement (4 corners) and size, persisted in config.json.
+ * Corner: 0=top-left 1=top-right 2=bottom-left 3=bottom-right.
+ * Scale: 1..4 extra multiplier on top of the resolution-derived font scale. */
+int Port_Config_FpsCorner(void);
+void Port_Config_CycleFpsCorner(int direction);
+int Port_Config_FpsScale(void);
+void Port_Config_CycleFpsScale(int direction);
+/* Dark semi-transparent panel behind the FPS counter (legibility). */
+bool Port_Config_FpsBackground(void);
+void Port_Config_ToggleFpsBackground(void);
+
+/* Overlay UI language: 0 = English, 1 = Português. Defaults to the console
+ * language on Switch, persisted in config.json. */
+int Port_Config_Language(void);
+void Port_Config_CycleLanguage(int direction);
 void Port_Config_SetWindowScale(u8 scale);
 void Port_Config_SetUpscaleMethod(const char* method);
 void Port_Config_SetTargetFps(u32 fps);
@@ -59,6 +75,18 @@ void Port_Config_CloseGamepads(void);
 
 /* Soft-slot input poll, indexed 0..3 (X, Y, L2, R2). */
 bool Port_Config_SoftSlotPressed(int slot);
+
+/* Left-analog-stick direction bitmask. Returns any combination of the
+ * PORT_DPAD_* flags below for the directions the stick is pushed past its
+ * dead zone (diagonals set two flags). The port ORs this with the physical
+ * D-pad so the stick moves Link without overriding the D-pad. */
+enum {
+    PORT_DPAD_RIGHT = 1 << 0,
+    PORT_DPAD_LEFT  = 1 << 1,
+    PORT_DPAD_UP    = 1 << 2,
+    PORT_DPAD_DOWN  = 1 << 3,
+};
+int Port_Config_AnalogDPad(void);
 
 /* Clear the per-input "pressed this frame" edge cache. Call after the
  * port has committed KEYINPUT and the engine has read it, so the next

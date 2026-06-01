@@ -331,6 +331,9 @@ extern "C" void Port_PPU_Init(SDL_Window* window) {
  * lives in port_bios.c; Port_Config_ShowFps in port_runtime_config.cpp. */
 extern "C" double Port_GetCurrentFps(void);
 extern "C" bool Port_Config_ShowFps(void);
+extern "C" int Port_Config_FpsCorner(void); /* 0=TL 1=TR 2=BL 3=BR */
+extern "C" int Port_Config_FpsScale(void);  /* 1..4 extra size multiplier */
+extern "C" bool Port_Config_FpsBackground(void); /* dark panel behind counter */
 
 extern "C" void Port_PPU_PresentFrame(void) {
     uint16_t dispcnt;
@@ -482,7 +485,45 @@ extern "C" void Port_PPU_PresentFrame(void) {
             char fpsBuf[24];
             std::snprintf(fpsBuf, sizeof(fpsBuf), "%.0f FPS", Port_GetCurrentFps());
             SDL_SetRenderDrawColor(sRenderer, 0, 255, 0, 255);
-            SDL_RenderDebugText(sRenderer, 8.0f, 8.0f, fpsBuf);
+
+            /* Place the counter in the configured corner (issue #5), sized by
+             * the configured multiplier (issue #6). The glyph cell on Switch is
+             * 8 * baseScale * fpsScale; on other targets the font is 8px and the
+             * extra multiplier is not applied (RenderDebugText has no scale). */
+            const int len = (int)std::strlen(fpsBuf);
+            const int corner = Port_Config_FpsCorner();
+            const int fpsScale = Port_Config_FpsScale();
+#ifdef __SWITCH__
+            const int cell = 8 * sdl3compat_DebugTextScale(sRenderer) * fpsScale;
+#else
+            (void)fpsScale;
+            const int cell = 8;
+#endif
+            const int textW = len * cell;
+            const int textH = cell;
+            const float margin = (float)cell;
+            float fx = (corner == 1 || corner == 3) ? (outW - textW - margin) : margin;
+            float fy = (corner == 2 || corner == 3) ? (outH - textH - margin) : margin;
+            if (fx < 0.0f) fx = 0.0f;
+            if (fy < 0.0f) fy = 0.0f;
+
+            /* Optional dark, lightly-transparent panel behind the counter so it
+             * stays readable over bright scenery. Drawn a little larger than the
+             * text on every side (pad scales with the glyph cell). */
+            if (Port_Config_FpsBackground()) {
+                const float pad = cell * 0.4f;
+                SDL_FRect bg = { fx - pad, fy - pad,
+                                 (float)textW + pad * 2.0f, (float)textH + pad * 2.0f };
+                SDL_SetRenderDrawBlendMode(sRenderer, SDL_BLENDMODE_BLEND);
+                SDL_SetRenderDrawColor(sRenderer, 32, 32, 32, 180); /* dark grey, ~70% */
+                SDL_RenderFillRect(sRenderer, &bg);
+                SDL_SetRenderDrawColor(sRenderer, 0, 255, 0, 255);  /* restore text colour */
+            }
+#ifdef __SWITCH__
+            sdl3compat_RenderDebugTextScaled(sRenderer, fx, fy, fpsBuf, fpsScale);
+#else
+            SDL_RenderDebugText(sRenderer, fx, fy, fpsBuf);
+#endif
         }
         SDL_RenderPresent(sRenderer);
         return;

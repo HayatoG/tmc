@@ -55,6 +55,17 @@ std::string sUpscaleMethod = "nearest";
 u64 sFrameTimeNs = 0;
 bool sPortSettingsMenuEnabled = true;
 bool sShowFps = false;
+/* FPS counter placement/size (issues #5/#6). Corner is 0=TL 1=TR 2=BL 3=BR;
+ * scale is an extra multiplier on top of the resolution-derived font scale so
+ * the counter can be made bigger/smaller independently of the menu overlay. */
+int sFpsCorner = 0;
+int sFpsScale = 1;
+/* Dark semi-transparent panel behind the FPS counter for legibility over
+ * bright backgrounds (off by default). */
+bool sFpsBackground = false;
+/* Overlay UI language: 0 = English, 1 = Português. Defaults to the console
+ * language on first run (see Port_Config_DefaultLanguage), then persists. */
+int sLanguage = -1; /* -1 = not yet resolved; resolved on first access/load */
 std::array<std::vector<Bind>, PORT_INPUT_COUNT> sBinds;
 /* Edge-detection cache. Set when the corresponding SDL key/button event
  * arrives during the frame; cleared by Port_Config_ClearInputEdges()
@@ -75,6 +86,9 @@ nlohmann::json DefaultsJson(void) {
         { "frame_time_ns", 0 },
         { "port_settings_menu", true },
         { "show_fps", false },
+        { "fps_corner", 0 },
+        { "fps_scale", 1 },
+        { "fps_background", false },
         { "bindings", nlohmann::json::object() },
     };
     for (const auto& d : kDefaults) {
@@ -213,6 +227,18 @@ extern "C" void Port_Config_Load(const char* path) {
     sFrameTimeNs = j.value("frame_time_ns", 0ULL);
     sPortSettingsMenuEnabled = j.value("port_settings_menu", true);
     sShowFps = j.value("show_fps", false);
+    int fpsCorner = j.value("fps_corner", 0);
+    sFpsCorner = fpsCorner >= 0 && fpsCorner <= 3 ? fpsCorner : 0;
+    int fpsScale = j.value("fps_scale", 1);
+    sFpsScale = fpsScale >= 1 && fpsScale <= 4 ? fpsScale : 1;
+    sFpsBackground = j.value("fps_background", false);
+    /* If config.json carries an explicit language, honour it; otherwise leave
+     * sLanguage = -1 so the first Port_Config_Language() resolves the console
+     * default. Range-check to {0,1}. */
+    if (j.contains("language")) {
+        int lang = j.value("language", 0);
+        sLanguage = (lang >= 0 && lang <= 2) ? lang : 0;
+    }
 
     for (auto& v : sBinds) {
         v.clear();
@@ -262,6 +288,71 @@ extern "C" bool Port_Config_ShowFps(void) {
 extern "C" void Port_Config_ToggleShowFps(void) {
     sShowFps = !sShowFps;
     sConfigJson["show_fps"] = sShowFps;
+    SaveConfig();
+}
+
+extern "C" int Port_Config_FpsCorner(void) {
+    return sFpsCorner;
+}
+
+extern "C" void Port_Config_CycleFpsCorner(int direction) {
+    int step = direction < 0 ? -1 : 1;
+    sFpsCorner = (sFpsCorner + step + 4) % 4; /* wrap through the 4 corners */
+    sConfigJson["fps_corner"] = sFpsCorner;
+    SaveConfig();
+}
+
+extern "C" int Port_Config_FpsScale(void) {
+    return sFpsScale;
+}
+
+extern "C" void Port_Config_CycleFpsScale(int direction) {
+    int step = direction < 0 ? -1 : 1;
+    sFpsScale += step;
+    if (sFpsScale < 1) sFpsScale = 1;
+    if (sFpsScale > 4) sFpsScale = 4;
+    sConfigJson["fps_scale"] = sFpsScale;
+    SaveConfig();
+}
+
+extern "C" bool Port_Config_FpsBackground(void) {
+    return sFpsBackground;
+}
+
+extern "C" void Port_Config_ToggleFpsBackground(void) {
+    sFpsBackground = !sFpsBackground;
+    sConfigJson["fps_background"] = sFpsBackground;
+    SaveConfig();
+}
+
+/* Default overlay language when config.json has no "language" key: the console
+ * language on Switch (Portuguese → PT), English everywhere else. */
+#ifdef __SWITCH__
+extern "C" int Port_Switch_SystemLanguage(void); /* switch_applet.c (C linkage): 0=EN 1=PT 2=ES */
+#endif
+
+static int Port_Config_DefaultLanguage(void) {
+#ifdef __SWITCH__
+    int l = Port_Switch_SystemLanguage();
+    return (l >= 0 && l <= 2) ? l : 0;
+#else
+    return 0;
+#endif
+}
+
+extern "C" int Port_Config_Language(void) {
+    if (sLanguage < 0) {
+        sLanguage = Port_Config_DefaultLanguage();
+    }
+    return sLanguage;
+}
+
+extern "C" void Port_Config_CycleLanguage(int direction) {
+    /* 0 = English, 1 = Português, 2 = Español. Cycle through all three; L and R
+     * walk in opposite directions. */
+    int step = direction < 0 ? -1 : 1;
+    sLanguage = (Port_Config_Language() + step + 3) % 3;
+    sConfigJson["language"] = sLanguage;
     SaveConfig();
 }
 
@@ -501,6 +592,30 @@ extern "C" bool Port_Config_SoftSlotPressed(int slot) {
     };
     if (slot < 0 || slot >= 4) return false;
     return Port_Config_InputPressed(kMap[slot]);
+}
+
+/* Left analog stick -> 8-way D-pad. Returns a bitmask of PORT_DPAD_* for any
+ * direction the stick is pushed past the dead zone, OR-combined across all
+ * connected pads. The caller (port_bios.c) ORs this with the real D-pad so the
+ * stick is purely additive — it never suppresses a held D-pad direction.
+ *
+ * The dead zone is larger than kAxisThreshold (used for L2/R2 triggers): a
+ * resting stick drifts a little, and the GBA only has 8 directions, so we want
+ * a deliberate push before a direction registers. Diagonals fall out naturally
+ * because X and Y are tested independently. */
+extern "C" int Port_Config_AnalogDPad(void) {
+    constexpr Sint16 kStickDeadZone = 12000; /* ~37% of the 0..32767 range */
+    int mask = 0;
+    SDL_UpdateGamepads();
+    for (SDL_Gamepad* pad : sPads) {
+        Sint16 ax = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTX);
+        Sint16 ay = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTY);
+        if (ax <= -kStickDeadZone) mask |= PORT_DPAD_LEFT;
+        if (ax >= kStickDeadZone) mask |= PORT_DPAD_RIGHT;
+        if (ay <= -kStickDeadZone) mask |= PORT_DPAD_UP;   /* SDL Y is +down */
+        if (ay >= kStickDeadZone) mask |= PORT_DPAD_DOWN;
+    }
+    return mask;
 }
 
 extern "C" void Port_Config_CloseGamepads(void) {

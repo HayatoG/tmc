@@ -64,6 +64,8 @@ typedef SDL_GameControllerButton SDL_GamepadButton;
 #define SDL_GAMEPAD_BUTTON_WEST         SDL_CONTROLLER_BUTTON_X
 #define SDL_GAMEPAD_BUTTON_COUNT        SDL_CONTROLLER_BUTTON_MAX
 #define SDL_GAMEPAD_AXIS_INVALID        SDL_CONTROLLER_AXIS_INVALID
+#define SDL_GAMEPAD_AXIS_LEFTX          SDL_CONTROLLER_AXIS_LEFTX
+#define SDL_GAMEPAD_AXIS_LEFTY          SDL_CONTROLLER_AXIS_LEFTY
 #define SDL_GAMEPAD_AXIS_LEFT_TRIGGER   SDL_CONTROLLER_AXIS_TRIGGERLEFT
 #define SDL_GAMEPAD_AXIS_COUNT          SDL_CONTROLLER_AXIS_MAX
 
@@ -164,6 +166,11 @@ static inline bool sdl3compat_SetWindowSurfaceVSync(SDL_Window* w, int v) {
 extern "C" {
 #endif
 bool sdl3compat_RenderDebugText(SDL_Renderer* r, float x, float y, const char* str);
+/* Integer scale the overlay font is drawn at (derived from output height). */
+int sdl3compat_DebugTextScale(SDL_Renderer* r);
+/* Draw debug text at an extra integer multiplier over the base scale. */
+bool sdl3compat_RenderDebugTextScaled(SDL_Renderer* r, float x, float y,
+                                      const char* str, int extraScale);
 #ifdef __cplusplus
 }
 #endif

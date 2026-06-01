@@ -116,9 +116,30 @@ static const unsigned char kFont8x8[128][8] = {
     [0x7E] = { 0x6E, 0x3B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }, /* ~ */
 };
 
-bool sdl3compat_RenderDebugText(SDL_Renderer* r, float x, float y, const char* str) {
-    if (r == NULL || str == NULL) {
-        return true;
+/*
+ * Integer scale factor for the debug font, derived from the renderer's output
+ * height so the 8x8 glyphs are legible on a TV. At 1:1 an 8px glyph is ~0.7% of
+ * a 1080p screen — unreadable from the couch. We pick S = max(2, outH/360):
+ *   - docked 1080p  -> S = 3  (24px glyphs)
+ *   - handheld 720p -> S = 2  (16px glyphs)
+ * The whole overlay (box, padding, FPS counter) keys off this so text and the
+ * geometry around it scale together. Public so port_debug_menu.cpp can size its
+ * box with the same factor instead of the raw SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE.
+ */
+int sdl3compat_DebugTextScale(SDL_Renderer* r) {
+    int outW = 0, outH = 0;
+    if (r != NULL && SDL_GetRendererOutputSize(r, &outW, &outH) == 0 && outH > 0) {
+        int s = outH / 360;
+        return s < 2 ? 2 : s;
+    }
+    return 2; /* safe default if the output size is unavailable */
+}
+
+/* Core glyph blitter at an explicit integer scale s (pixels become s x s). */
+static void sdl3compat_DrawTextAtScale(SDL_Renderer* r, float x, float y,
+                                       const char* str, int s) {
+    if (s < 1) {
+        s = 1;
     }
     int baseX = (int)x;
     int baseY = (int)y;
@@ -128,19 +149,51 @@ bool sdl3compat_RenderDebugText(SDL_Renderer* r, float x, float y, const char* s
             c = (unsigned char)'?';
         }
         const unsigned char* glyph = kFont8x8[c];
-        int gx = baseX + i * 8;
+        int gx = baseX + i * 8 * s;
         for (int row = 0; row < 8; row++) {
             unsigned char bits = glyph[row];
             if (bits == 0) {
                 continue;
             }
-            for (int col = 0; col < 8; col++) {
-                if (bits & (1u << col)) {
-                    SDL_Rect px = { gx + col, baseY + row, 1, 1 };
-                    SDL_RenderFillRect(r, &px);
+            /* Coalesce runs of set bits into one fill so a glyph costs at most
+             * 8 rects/row instead of 8*s*s 1x1 fills. */
+            int col = 0;
+            while (col < 8) {
+                if (!(bits & (1u << col))) {
+                    col++;
+                    continue;
                 }
+                int run = 1;
+                while (col + run < 8 && (bits & (1u << (col + run)))) {
+                    run++;
+                }
+                SDL_Rect px = { gx + col * s, baseY + row * s, run * s, s };
+                SDL_RenderFillRect(r, &px);
+                col += run;
             }
         }
     }
+}
+
+bool sdl3compat_RenderDebugText(SDL_Renderer* r, float x, float y, const char* str) {
+    if (r == NULL || str == NULL) {
+        return true;
+    }
+    sdl3compat_DrawTextAtScale(r, x, y, str, sdl3compat_DebugTextScale(r));
+    return true;
+}
+
+/* Like RenderDebugText but with an extra integer multiplier on the base scale,
+ * used by the FPS counter so its size is adjustable independently of the menu
+ * overlay (issue #6). extraScale=1 matches the normal overlay text size. */
+bool sdl3compat_RenderDebugTextScaled(SDL_Renderer* r, float x, float y,
+                                      const char* str, int extraScale) {
+    if (r == NULL || str == NULL) {
+        return true;
+    }
+    if (extraScale < 1) {
+        extraScale = 1;
+    }
+    sdl3compat_DrawTextAtScale(r, x, y, str, sdl3compat_DebugTextScale(r) * extraScale);
     return true;
 }

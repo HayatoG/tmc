@@ -56,6 +56,14 @@ unsigned char Port_Config_InternalScale(void);
 void          Port_Config_CycleInternalScale(int direction);
 bool          Port_Config_ShowFps(void);
 void          Port_Config_ToggleShowFps(void);
+int           Port_Config_FpsCorner(void);
+void          Port_Config_CycleFpsCorner(int direction);
+int           Port_Config_FpsScale(void);
+void          Port_Config_CycleFpsScale(int direction);
+bool          Port_Config_FpsBackground(void);
+void          Port_Config_ToggleFpsBackground(void);
+int           Port_Config_Language(void);          /* 0 = EN, 1 = PT */
+void          Port_Config_CycleLanguage(int direction);
 
 /* Soft-slot equip-button assignments (port_softslots.c). */
 const char*   Port_SoftSlots_GetSlotLabel(int slot);
@@ -68,6 +76,7 @@ int           Port_QuickSave_Slot(int slot);
 int           Port_QuickLoad_Slot(int slot);
 int           Port_QuickSave_SlotHasSnapshot(int slot);
 int           Port_QuickSave_SlotCount(void);
+int           Port_QuickSave_CanSave(void);
 }
 
 namespace {
@@ -128,6 +137,17 @@ unsigned int sToastUntilTicks = 0;
  * top-level HandleKey caller via these flags. */
 int sPendingPops = 0;
 bool sPendingClose = false;
+
+/* Pick the string for the current overlay language (Port_Config_Language:
+ * 0 = EN, 1 = PT, 2 = ES). PT/ES strings are written WITHOUT accents on
+ * purpose — the 8x8 overlay font is ASCII-only. Falls back to English. */
+static const char* Tr(const char* en, const char* pt, const char* es) {
+    switch (Port_Config_Language()) {
+        case 1:  return pt;
+        case 2:  return es;
+        default: return en;
+    }
+}
 
 void Toast(const std::string& msg) {
     sToast = msg;
@@ -310,7 +330,7 @@ MenuPage BuildDisplaySettingsPage(void) {
      * Each item has a labelFn that re-reads the current value every frame
      * so the row updates immediately as you cycle. */
     MenuPage p;
-    p.title = "DISPLAY SETTINGS";
+    p.title = Tr("DISPLAY SETTINGS", "CONFIGURACOES", "CONFIGURACION");
 
 #ifndef __SWITCH__
     /* Window scale is a PC-only knob. On Switch the display is a fixed
@@ -333,7 +353,7 @@ MenuPage BuildDisplaySettingsPage(void) {
     filter.labelFn = []() {
         const char* name = Port_PPU_PresentationModeName();
         char buf[64];
-        std::snprintf(buf, sizeof(buf), "Upscale     %s", name ? name : "?");
+        std::snprintf(buf, sizeof(buf), "%-11s %s", Tr("Upscale", "Ampliacao", "Reescalado"), name ? name : "?");
         return std::string(buf);
     };
     p.items.push_back(std::move(filter));
@@ -344,7 +364,7 @@ MenuPage BuildDisplaySettingsPage(void) {
     crtFilter.labelFn = []() {
         const char* name = Port_PPU_FilterName();
         char buf[80];
-        std::snprintf(buf, sizeof(buf), "CRT filter  %s", name ? name : "?");
+        std::snprintf(buf, sizeof(buf), "%-11s %s", Tr("CRT filter", "Filtro CRT", "Filtro CRT"), name ? name : "?");
         return std::string(buf);
     };
     p.items.push_back(std::move(crtFilter));
@@ -391,8 +411,8 @@ MenuPage BuildDisplaySettingsPage(void) {
          * meaningless on a fixed fullscreen framebuffer). 1x = native,
          * higher = sharper affine/rotation + better filter input. */
         std::snprintf(buf, sizeof(buf),
-                      s == 1 ? "Scale       %ux  (native)"
-                             : "Scale       %ux  (supersampled)",
+                      s == 1 ? Tr("Scale       %ux  (native)", "Escala      %ux  (nativo)", "Escala      %ux  (nativo)")
+                             : Tr("Scale       %ux  (supersampled)", "Escala      %ux  (supersample)", "Escala      %ux  (supersample)"),
                       s);
 #else
         /* Affine OAM is sub-pixel at scale > 1; everything else is S*S
@@ -406,24 +426,102 @@ MenuPage BuildDisplaySettingsPage(void) {
     };
     p.items.push_back(std::move(internalScale));
 
+    /* Overlay language (EN/PT). Placed near the top so it's easy to find;
+     * binary toggle. PT labels in the overlay are accent-free (ASCII font). */
+    {
+        MenuItem lang;
+        lang.cycleLeft  = []() { Port_Config_CycleLanguage(-1); };
+        lang.cycleRight = []() { Port_Config_CycleLanguage(+1); };
+        lang.labelFn = []() {
+            int l = Port_Config_Language();
+            const char* name = (l == 1) ? "Portugues" : (l == 2) ? "Espanol" : "English";
+            char buf[40];
+            std::snprintf(buf, sizeof(buf), "%s  %s", Tr("Language", "Idioma", "Idioma"), name);
+            return std::string(buf);
+        };
+        p.items.push_back(std::move(lang));
+    }
+
     MenuItem fpsCounter;
     /* Binary toggle, so left/right both flip it. */
     fpsCounter.cycleLeft  = []() { Port_Config_ToggleShowFps(); };
     fpsCounter.cycleRight = []() { Port_Config_ToggleShowFps(); };
     fpsCounter.labelFn = []() {
-        char buf[32];
-        std::snprintf(buf, sizeof(buf), "FPS counter %s", Port_Config_ShowFps() ? "on" : "off");
+        char buf[40];
+        std::snprintf(buf, sizeof(buf), "%s %s", Tr("FPS counter", "Contador FPS", "Contador FPS"),
+                      Port_Config_ShowFps() ? Tr("on", "lig", "act") : Tr("off", "des", "des"));
         return std::string(buf);
     };
     p.items.push_back(std::move(fpsCounter));
 
-    /* Save states — Enter opens the slot overview. Lives here (not only on
-     * the F8 main page) because on Switch the Minus button opens *this* page
-     * via Port_DebugMenu_OpenSettings(), and the Switch has no F5/F6 keys, so
-     * this is the only way to reach save/load with a gamepad. */
-    p.items.push_back({ "Save states  >", []() { Push(BuildSaveStatesPage()); } });
+    /* FPS counter placement (issue #5): cycle through the 4 corners. */
+    {
+        MenuItem fpsPos;
+        fpsPos.cycleLeft  = []() { Port_Config_CycleFpsCorner(-1); };
+        fpsPos.cycleRight = []() { Port_Config_CycleFpsCorner(+1); };
+        fpsPos.labelFn = []() {
+            int c = Port_Config_FpsCorner();
+            if (c < 0 || c > 3) c = 0;
+            const char* corner =
+                c == 0 ? Tr("top-left", "sup-esq", "sup-izq") :
+                c == 1 ? Tr("top-right", "sup-dir", "sup-der") :
+                c == 2 ? Tr("bottom-left", "inf-esq", "inf-izq") :
+                         Tr("bottom-right", "inf-dir", "inf-der");
+            char buf[48];
+            std::snprintf(buf, sizeof(buf), "%s %s", Tr("FPS position", "Posicao FPS", "Posicion FPS"), corner);
+            return std::string(buf);
+        };
+        p.items.push_back(std::move(fpsPos));
+    }
 
-    p.items.push_back({ "<- Back", []() { Pop(); } });
+    /* FPS counter size (issue #6): cycle the extra size multiplier 1x..4x. */
+    {
+        MenuItem fpsSize;
+        fpsSize.cycleLeft  = []() { Port_Config_CycleFpsScale(-1); };
+        fpsSize.cycleRight = []() { Port_Config_CycleFpsScale(+1); };
+        fpsSize.labelFn = []() {
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "%s %dx", Tr("FPS size", "Tamanho FPS", "Tamano FPS"),
+                          Port_Config_FpsScale());
+            return std::string(buf);
+        };
+        p.items.push_back(std::move(fpsSize));
+    }
+
+    /* Dark panel behind the FPS counter (legibility). Binary toggle. */
+    {
+        MenuItem fpsBg;
+        fpsBg.cycleLeft  = []() { Port_Config_ToggleFpsBackground(); };
+        fpsBg.cycleRight = []() { Port_Config_ToggleFpsBackground(); };
+        fpsBg.labelFn = []() {
+            char buf[40];
+            std::snprintf(buf, sizeof(buf), "%s %s", Tr("FPS background", "Fundo FPS", "Fondo FPS"),
+                          Port_Config_FpsBackground() ? Tr("on", "lig", "act") : Tr("off", "des", "des"));
+            return std::string(buf);
+        };
+        p.items.push_back(std::move(fpsBg));
+    }
+
+    /* Save states — TEMPORARILY DISABLED. The in-memory snapshot still crashes
+     * on the save→load→cross-room path (script-context side-table gap fixed, but
+     * not yet verified end-to-end on hardware). Hidden from the menu until the
+     * save-state work is validated. See docs/Features/SaveStates.md for status
+     * and the remaining plan. Re-enable by uncommenting this block.
+     *
+     * {
+     *     MenuItem ss;
+     *     ss.action = []() { Push(BuildSaveStatesPage()); };
+     *     ss.labelFn = []() { return std::string(Tr("Save states  >", "Save states  >", "Save states  >")); };
+     *     p.items.push_back(std::move(ss));
+     * }
+     */
+
+    {
+        MenuItem back;
+        back.action = []() { Pop(); };
+        back.labelFn = []() { return std::string(Tr("<- Back", "<- Voltar", "<- Atras")); };
+        p.items.push_back(std::move(back));
+    }
     return p;
 }
 
@@ -453,38 +551,56 @@ MenuPage BuildSaveStateSlotPage(int slot) {
     std::snprintf(title, sizeof(title), "SAVE STATE - SLOT %d", slot + 1);
     p.title = title;
 
-    p.items.push_back({ "Salvar neste slot", [slot]() {
-        if (Port_QuickSave_Slot(slot)) {
-            char buf[48];
-            std::snprintf(buf, sizeof(buf), "Slot %d salvo", slot + 1);
-            Toast(buf);
-        } else {
-            Toast("Falha ao salvar");
-        }
-    } });
+    {
+        MenuItem save;
+        save.action = [slot]() {
+            if (Port_QuickSave_Slot(slot)) {
+                char buf[48];
+                std::snprintf(buf, sizeof(buf), "%s %d", Tr("Saved slot", "Slot salvo", "Slot guardado"), slot + 1);
+                Toast(buf);
+            } else if (!Port_QuickSave_CanSave()) {
+                /* The state guard rejected it — saving in a transition would
+                 * capture a half-built entity graph that crashes on load. */
+                Toast(Tr("Can only save during gameplay", "So pode salvar durante o jogo", "Solo se guarda durante el juego"));
+            } else {
+                Toast(Tr("Save failed", "Falha ao salvar", "Error al guardar"));
+            }
+        };
+        save.labelFn = []() { return std::string(Tr("Save to this slot", "Salvar neste slot", "Guardar en este slot")); };
+        p.items.push_back(std::move(save));
+    }
 
     MenuItem load;
     load.action = [slot]() {
         if (!Port_QuickSave_SlotHasSnapshot(slot)) {
-            Toast("Slot vazio");
+            Toast(Tr("Empty slot", "Slot vazio", "Slot vacio"));
             return;
         }
         if (Port_QuickLoad_Slot(slot)) {
+            /* The restore itself happens at the next frame boundary (deferred
+             * for safety). Close the menu so the player sees the result. */
             char buf[48];
-            std::snprintf(buf, sizeof(buf), "Slot %d carregado", slot + 1);
+            std::snprintf(buf, sizeof(buf), "%s %d", Tr("Loaded slot", "Slot carregado", "Slot cargado"), slot + 1);
             Toast(buf);
+            Pop(); /* close slot page */
+            Pop(); /* close save-states page */
         } else {
-            Toast("Falha ao carregar");
+            Toast(Tr("Load failed", "Falha ao carregar", "Error al cargar"));
         }
     };
     load.labelFn = [slot]() {
-        return std::string(Port_QuickSave_SlotHasSnapshot(slot)
-                               ? "Carregar deste slot"
-                               : "Carregar deste slot (vazio)");
+        bool has = Port_QuickSave_SlotHasSnapshot(slot);
+        return std::string(has ? Tr("Load from this slot", "Carregar deste slot", "Cargar de este slot")
+                               : Tr("Load from this slot (empty)", "Carregar deste slot (vazio)", "Cargar de este slot (vacio)"));
     };
     p.items.push_back(std::move(load));
 
-    p.items.push_back({ "<- Voltar", []() { Pop(); } });
+    {
+        MenuItem back;
+        back.action = []() { Pop(); };
+        back.labelFn = []() { return std::string(Tr("<- Back", "<- Voltar", "<- Atras")); };
+        p.items.push_back(std::move(back));
+    }
     return p;
 }
 
@@ -502,12 +618,18 @@ MenuPage BuildSaveStatesPage(void) {
         it.labelFn = [s]() {
             char buf[32];
             std::snprintf(buf, sizeof(buf), "Slot %d: %s", s + 1,
-                          Port_QuickSave_SlotHasSnapshot(s) ? "ocupado" : "vazio");
+                          Port_QuickSave_SlotHasSnapshot(s) ? Tr("used", "ocupado", "ocupado")
+                                                            : Tr("empty", "vazio", "vacio"));
             return std::string(buf);
         };
         p.items.push_back(std::move(it));
     }
-    p.items.push_back({ "<- Voltar", []() { Pop(); } });
+    {
+        MenuItem back;
+        back.action = []() { Pop(); };
+        back.labelFn = []() { return std::string(Tr("<- Back", "<- Voltar", "<- Atras")); };
+        p.items.push_back(std::move(back));
+    }
     return p;
 }
 
@@ -517,7 +639,8 @@ MenuPage BuildMainPage(void) {
     p.items.push_back({ "Items / progress",  []() { Push(BuildItemsPage()); } });
     p.items.push_back({ "Warp",              []() { Push(BuildWarpPage());  } });
     p.items.push_back({ "Display settings",  []() { Push(BuildDisplaySettingsPage()); } });
-    p.items.push_back({ "Save states",       []() { Push(BuildSaveStatesPage()); } });
+    /* Save states temporarily disabled — see docs/Features/SaveStates.md.
+     * p.items.push_back({ "Save states",       []() { Push(BuildSaveStatesPage()); } }); */
     p.items.push_back({ "Extra equip slots", []() { Push(BuildSoftSlotsPage()); } });
     p.items.push_back({ "Heal to full",      []() { Port_DebugAction_HealFull(); Toast("Healed"); } });
     p.items.push_back({ "Close menu",        []() { Pop(); } });
@@ -668,21 +791,39 @@ extern "C" bool Port_DebugMenu_HandleKey(int sdlKey) {
     return consumed;
 }
 
+/* Effective glyph width. On Switch the debug font is drawn scaled (see
+ * sdl3compat_DebugTextScale) so the overlay geometry must use the same scaled
+ * cell or the box and text drift apart. On other targets it is the raw 8px. */
+static int Port_DebugMenu_CharW(SDL_Renderer* renderer) {
+#ifdef __SWITCH__
+    extern int sdl3compat_DebugTextScale(SDL_Renderer*);
+    return SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE * sdl3compat_DebugTextScale(renderer);
+#else
+    (void)renderer;
+    return SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE;
+#endif
+}
+
 extern "C" void Port_DebugMenu_Render(SDL_Renderer* renderer, int winW, int winH) {
     if (!renderer) {
         return;
     }
 
+    const int charW = Port_DebugMenu_CharW(renderer);
+
     /* Toast: visible whether menu is open or not, e.g. after a warp. */
     if (!sToast.empty() && SDL_GetTicks() < sToastUntilTicks) {
-        const int charW = SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE;
         int textW = static_cast<int>(sToast.size()) * charW;
-        SDL_FRect bg = { (winW - textW) * 0.5f - 6.0f, winH - 28.0f, static_cast<float>(textW) + 12.0f, 18.0f };
+        float padX = charW * 0.75f;
+        float padY = charW * 0.6f;
+        float bgH = charW + padY * 2.0f;
+        SDL_FRect bg = { (winW - textW) * 0.5f - padX, winH - bgH - 12.0f,
+                         static_cast<float>(textW) + padX * 2.0f, bgH };
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 200);
         SDL_RenderFillRect(renderer, &bg);
         SDL_SetRenderDrawColor(renderer, 255, 240, 64, 255);
-        SDL_RenderDebugText(renderer, bg.x + 6.0f, bg.y + 5.0f, sToast.c_str());
+        SDL_RenderDebugText(renderer, bg.x + padX, bg.y + padY, sToast.c_str());
     }
 
     if (!sOpen || sPageStack.empty()) {
@@ -690,7 +831,6 @@ extern "C" void Port_DebugMenu_Render(SDL_Renderer* renderer, int winW, int winH
     }
 
     const MenuPage& page = sPageStack.back();
-    const int charW = SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE;
 
     /* Scroll viewport: clamp to a window of kVisibleItemsMax items. The
      * key handler keeps page.cursor inside [viewportTop, viewportTop + visible). */
@@ -725,8 +865,15 @@ extern "C" void Port_DebugMenu_Render(SDL_Renderer* renderer, int winW, int winH
     }
     cols = std::max(cols, 36);
 
-    float boxW = static_cast<float>(cols * charW + 16);
-    float boxH = static_cast<float>(rows * (charW + 4) + 12);
+    /* All geometry derives from charW (which is already scaled on Switch), so
+     * the box, padding and line pitch grow together with the font instead of
+     * being fixed pixel counts that look cramped at 2x/3x. Row pitch leaves
+     * ~28% leading between lines; inner padding is roughly one glyph cell. */
+    const float kRowPitch = charW * 1.28f;
+    const float padX = charW * 1.0f;
+    const float padY = charW * 0.9f;
+    float boxW = static_cast<float>(cols * charW) + padX * 2.0f;
+    float boxH = static_cast<float>(rows) * kRowPitch + padY * 2.0f;
     SDL_FRect box = { (winW - boxW) * 0.5f, (winH - boxH) * 0.5f, boxW, boxH };
 
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
@@ -735,7 +882,9 @@ extern "C" void Port_DebugMenu_Render(SDL_Renderer* renderer, int winW, int winH
     SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255);
     SDL_RenderRect(renderer, &box);
 
-    float y = box.y + 8.0f;
+    const float textX = box.x + padX;
+    float y = box.y + padY;
+
     SDL_SetRenderDrawColor(renderer, 200, 220, 255, 255);
     char titleBuf[160];
     if (total > kVisibleItemsMax) {
@@ -744,13 +893,13 @@ extern "C" void Port_DebugMenu_Render(SDL_Renderer* renderer, int winW, int winH
     } else {
         std::snprintf(titleBuf, sizeof(titleBuf), "%s", page.title.c_str());
     }
-    SDL_RenderDebugText(renderer, box.x + 8.0f, y, titleBuf);
-    y += charW + 8.0f;
+    SDL_RenderDebugText(renderer, textX, y, titleBuf);
+    y += kRowPitch + charW * 0.25f;
 
     if (moreAbove) {
         SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
-        SDL_RenderDebugText(renderer, box.x + 8.0f, y, "  ^ ^ ^");
-        y += charW + 4.0f;
+        SDL_RenderDebugText(renderer, textX, y, "  ^ ^ ^");
+        y += kRowPitch;
     }
 
     for (int i = top; i < top + visible && i < total; ++i) {
@@ -762,19 +911,25 @@ extern "C" void Port_DebugMenu_Render(SDL_Renderer* renderer, int winW, int winH
         } else {
             SDL_SetRenderDrawColor(renderer, 230, 230, 230, 255);
         }
-        SDL_RenderDebugText(renderer, box.x + 8.0f, y, line.c_str());
-        y += charW + 4.0f;
+        SDL_RenderDebugText(renderer, textX, y, line.c_str());
+        y += kRowPitch;
     }
 
     if (moreBelow) {
         SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
-        SDL_RenderDebugText(renderer, box.x + 8.0f, y, "  v v v");
-        y += charW + 4.0f;
+        SDL_RenderDebugText(renderer, textX, y, "  v v v");
+        y += kRowPitch;
     }
 
-    y += 4.0f;
+    y += charW * 0.25f;
     SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
-    SDL_RenderDebugText(renderer, box.x + 8.0f, y, "Up/Dn move  PgUp/PgDn page  Home/End ends");
-    y += charW + 4.0f;
-    SDL_RenderDebugText(renderer, box.x + 8.0f, y, "Enter select  L/R cycle  Esc back  (save: Save states)");
+    SDL_RenderDebugText(renderer, textX, y,
+        Tr("Up/Dn move  PgUp/PgDn page  Home/End ends",
+           "Cima/Baixo mover  PgUp/PgDn pagina  Home/End extremos",
+           "Arriba/Abajo mover  PgUp/PgDn pagina  Home/End extremos"));
+    y += kRowPitch;
+    SDL_RenderDebugText(renderer, textX, y,
+        Tr("Enter select  L/R cycle  Esc back",
+           "Enter seleciona  L/R altera  Esc volta",
+           "Enter selecciona  L/R cambia  Esc atras"));
 }
