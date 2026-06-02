@@ -320,6 +320,51 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+#ifdef __SWITCH__
+    /* Library-applet check (issue #17): if the port was opened as a library
+     * applet (e.g. via the Homebrew Menu's Album, or nxlink) it gets a tiny
+     * memory pool and cannot start (16 MB ROM + ~14 MB map data won't fit).
+     * Detect it here — after SDL video init but before the ROM probe, since with
+     * no memory nothing downstream can succeed — and show a blocking NATIVE error
+     * dialog (Port_Switch_ShowFatalMessage → libnx error applet) explaining the
+     * fix. We do NOT use SDL_ShowSimpleMessageBox: on the Switch there is no host
+     * window manager to draw it, so it shows nothing and returns instantly. Text
+     * follows the overlay language (0=EN,1=PT,2=ES), ASCII-only like the UI. */
+    {
+        extern int Port_Switch_IsLibraryApplet(void);
+        extern int Port_Config_Language(void);
+        extern void Port_Switch_ShowFatalMessage(const char* short_msg, const char* detail);
+        if (Port_Switch_IsLibraryApplet()) {
+            const char* title;
+            const char* detail;
+            switch (Port_Config_Language()) {
+                case 1:
+                    title = "Memoria limitada (modo applet)";
+                    detail = "Abra com memoria total: segure R ao iniciar um jogo "
+                             "no menu inicial, ou use o forwarder NSP. Aberto pelo "
+                             "Album, o jogo nao tem memoria suficiente para rodar.";
+                    break;
+                case 2:
+                    title = "Memoria limitada (modo applet)";
+                    detail = "Abra con memoria total: manten R al iniciar un juego "
+                             "en el menu inicial, o usa el forwarder NSP. Abierto "
+                             "desde el Album, el juego no tiene memoria suficiente.";
+                    break;
+                default:
+                    title = "Limited memory (applet mode)";
+                    detail = "Open with full memory: hold R when starting a game "
+                             "from the home menu, or use the NSP forwarder. Opened "
+                             "via the Album, the game has too little memory to run.";
+                    break;
+            }
+            fprintf(stderr, "[applet] %s — %s\n", title, detail);
+            Port_Switch_ShowFatalMessage(title, detail);
+            SDL_Quit();
+            return 1;
+        }
+    }
+#endif
+
     Port_Config_OpenGamepads();
 
     /* Pre-window ROM presence check: bail out with a message box BEFORE

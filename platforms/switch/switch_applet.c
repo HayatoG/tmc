@@ -95,3 +95,28 @@ int Port_Switch_SystemLanguage(void) {
     }
     return result;
 }
+
+/* True when the port was launched as a library applet (e.g. opened through the
+ * Homebrew Menu's Album entry) instead of a full application. Library applets
+ * get a small memory pool, which is not enough for the port (16 MB ROM + ~14 MB
+ * map data + heaps), so it fails to start. We detect this up front and warn the
+ * user (port_main.c) instead of crashing silently. AppletType_Application (0)
+ * and AppletType_SystemApplication (4) have the full pool; only
+ * AppletType_LibraryApplet (2) is the limited case we reject. */
+int Port_Switch_IsLibraryApplet(void) {
+    return appletGetAppletType() == AppletType_LibraryApplet;
+}
+
+/* Show a blocking, native Switch error dialog (the system error applet) and
+ * wait for the user to dismiss it. SDL_ShowSimpleMessageBox does NOT work on
+ * the Switch — there is no host window manager to draw it, so it returns
+ * immediately and nothing is shown. The error applet is the correct modal:
+ * always visible, dismissable with a button. `short_msg` is the dialog title
+ * line, `detail` the body. Both are plain ASCII (the applet renders system
+ * fonts, so accents are fine too, but we keep ASCII for consistency). */
+void Port_Switch_ShowFatalMessage(const char* short_msg, const char* detail) {
+    ErrorSystemConfig c;
+    if (R_SUCCEEDED(errorSystemCreate(&c, short_msg, detail))) {
+        errorSystemShow(&c); /* blocks until the user closes the dialog */
+    }
+}
