@@ -27,6 +27,16 @@ extern "C" void virtuappu_mode1_render_affine_obj_overlay(uint32_t* dst, int dst
 extern "C" void Port_Switch_AppletTick(int* outW, int* outH, int* resized);
 /* RetroAchievements per-frame tick (issue #12); no-op until a game is loaded. */
 extern "C" void Port_RA_DoFrame(void);
+#ifdef TMC_PERF
+/* Frame profiler marks (switch_perf.c) — measures PPU vs logic/present split. */
+extern "C" void Port_Perf_FrameStart(void);
+extern "C" void Port_Perf_AfterPPU(void);
+extern "C" void Port_Perf_FrameEnd(void);
+#else
+#define Port_Perf_FrameStart() ((void)0)
+#define Port_Perf_AfterPPU()   ((void)0)
+#define Port_Perf_FrameEnd()   ((void)0)
+#endif
 #endif
 
 /* Manual access to gMain (the engine's Main struct): including main.h
@@ -341,6 +351,10 @@ extern "C" void Port_PPU_PresentFrame(void) {
     uint16_t dispcnt;
     uint8_t gbaMode;
 
+#if defined(__SWITCH__) && defined(TMC_PERF)
+    Port_Perf_FrameStart();
+#endif
+
 #ifdef __SWITCH__
     /* RetroAchievements per-frame tick (issue #12): evaluates achievement
      * conditions against emulated RAM and fires unlock events. No-op until a
@@ -386,6 +400,10 @@ extern "C" void Port_PPU_PresentFrame(void) {
     }
 
     virtuappu_render_frame();
+
+#if defined(__SWITCH__) && defined(TMC_PERF)
+    Port_Perf_AfterPPU();
+#endif
 
     /* Widescreen-spike post-process: on screens where the engine doesn't
      * load BG tile data past column 239 (title, file-select), the extra
@@ -533,10 +551,16 @@ extern "C" void Port_PPU_PresentFrame(void) {
 #endif
         }
         SDL_RenderPresent(sRenderer);
+#if defined(__SWITCH__) && defined(TMC_PERF)
+        Port_Perf_FrameEnd();
+#endif
         return;
     }
 
     Port_PPU_PresentSurfaceFrame();
+#if defined(__SWITCH__) && defined(TMC_PERF)
+    Port_Perf_FrameEnd();
+#endif
 }
 
 extern "C" void Port_PPU_SetWindowTitle(const char* title) {

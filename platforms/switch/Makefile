@@ -41,6 +41,7 @@ ARCH := -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -ftls-model=local-
 DEFINES := -D__SWITCH__ -DPC_PORT -DNON_MATCHING -D$(GAME_VER) -DENGLISH -DREVISION=0 \
            -DFMT_HEADER_ONLY=1 -DTMC_PC_VERSION=\"0.2.1.1\" -DTMC_PORT_VERSION=\"0.2.1.1\" \
            -DMODE1_GBA_WIDTH=288 -DCURL_STATICLIB -DTMC_GPU_RENDER
+# Add -DTMC_PERF to enable the frame profiler (switch_perf.c → perf.log).
 
 # Release flavour: define TMC_RELEASE (gates SD logging in the C/C++ sources).
 ifeq ($(RELEASE),1)
@@ -85,7 +86,7 @@ LIBS := -lSDL2 -lpng -lz -lEGL -lglapi -ldrm_nouveau \
 # libnx-thread parallel-for + background runner for on-device extraction,
 # applet lifecycle = docked resolution + HOME/sleep audio pause).
 SWITCH_SRCS := switch_stubs.c switch_romfs.c switch_parallel.c switch_applet.c \
-               switch_render_pool.c switch_net.c compat/sdl3_debug_text.c
+               switch_render_pool.c switch_net.c switch_perf.c compat/sdl3_debug_text.c
 
 # rcheevos (RetroAchievements, issue #12) — vendored submodule, ROOT-relative so
 # the $(ROOT)/%.c rule builds them. Pure C, no external deps; _WIN32 is undefined
