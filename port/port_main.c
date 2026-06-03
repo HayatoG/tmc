@@ -261,17 +261,14 @@ int main(int argc, char* argv[]) {
         Port_Switch_BootstrapAssetsFromRomfs();
     }
 
-    /* Networking infra (issue #12 groundwork): bring up the socket driver and
-     * run a one-shot HTTPS smoke test, logged to sdmc:/switch/tmc/net.log. This
-     * validates the whole TLS path (system CA store) on hardware before any
-     * RetroAchievements code exists. Library-applet launches were already
-     * rejected above (#17), so we always have full-memory networking here.
-     * TODO(#12): drop the smoke test once rc_client is wired; keep Port_Net_Init. */
+    /* Networking infra (issue #12 groundwork): bring up the socket driver +
+     * libcurl so the port can do HTTPS (RetroAchievements). The TLS path (system
+     * CA store, no bundled certs) was validated on hardware via Port_Net_SmokeTest
+     * (still in switch_net.c for reuse). Library-applet launches were already
+     * rejected above (#17), so networking always runs in full-memory mode. */
     {
         extern void Port_Net_Init(void);
-        extern void Port_Net_SmokeTest(void);
         Port_Net_Init();
-        Port_Net_SmokeTest();
     }
 #endif
 
