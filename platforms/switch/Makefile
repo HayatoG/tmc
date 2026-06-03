@@ -40,7 +40,7 @@ ARCH := -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -ftls-model=local-
 
 DEFINES := -D__SWITCH__ -DPC_PORT -DNON_MATCHING -D$(GAME_VER) -DENGLISH -DREVISION=0 \
            -DFMT_HEADER_ONLY=1 -DTMC_PC_VERSION=\"0.2.1.1\" -DTMC_PORT_VERSION=\"0.2.1.1\" \
-           -DMODE1_GBA_WIDTH=288
+           -DMODE1_GBA_WIDTH=288 -DCURL_STATICLIB
 
 # Release flavour: define TMC_RELEASE (gates SD logging in the C/C++ sources).
 ifeq ($(RELEASE),1)
@@ -72,13 +72,19 @@ CXXFLAGS += -std=gnu++20
 LDFLAGS := -specs=$(LIBNX)/switch.specs $(DEBUGFLAG) $(ARCH) -Wl,--gc-sections \
            -L$(PORTLIBS)/lib -L$(LIBNX)/lib
 # switch-sdl2 pulls in the Mesa/EGL stack + libnx (see sdl2-config --libs).
-LIBS := -lSDL2 -lpng -lz -lEGL -lglapi -ldrm_nouveau -lnx -lpthread -lm
+# -lcurl uses the libnx TLS backend (system CA store, no bundled certs); it must
+# precede -lnx so the ssl-service symbols resolve. mbedtls* supply the crypto.
+# See `curl-config --libs`: -lcurl -lnx -lz. Needed for HTTPS (RetroAchievements,
+# issue #12). Compiled with -DCURL_STATICLIB (DEFINES) for the static link.
+LIBS := -lSDL2 -lpng -lz -lEGL -lglapi -ldrm_nouveau \
+        -lcurl -lmbedtls -lmbedx509 -lmbedcrypto \
+        -lnx -lpthread -lm
 
 # Switch-only support sources (ViruaPPU patch-symbol stub, romfs bootstrap,
 # libnx-thread parallel-for + background runner for on-device extraction,
 # applet lifecycle = docked resolution + HOME/sleep audio pause).
 SWITCH_SRCS := switch_stubs.c switch_romfs.c switch_parallel.c switch_applet.c \
-               switch_render_pool.c compat/sdl3_debug_text.c
+               switch_render_pool.c switch_net.c compat/sdl3_debug_text.c
 
 # Optional embedded romfs (pre-baked asset cache). Populated by
 # build_extractor.sh into ./romfs/. If present, elf2nro bundles it so the .nro
