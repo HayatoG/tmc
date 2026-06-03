@@ -471,6 +471,24 @@ int main(int argc, char* argv[]) {
     Port_EnsureAssetsReadyWithDisplay(window, gRomData, gRomSize);
     Port_CheckForUpdates(window);
 
+#ifdef __SWITCH__
+    /* RetroAchievements (issue #12): now that the ROM is in memory (gRomData),
+     * create the client and attempt a SILENT token re-login (only if the user
+     * logged in before — no keyboard, no boot block for non-RA users). The
+     * interactive keyboard login is user-triggered from the settings menu
+     * (Port_RA_InteractiveLogin). On a successful login the game's achievement
+     * set loads (hash → game id) and per-frame evaluation runs from
+     * Port_PPU_PresentFrame. Softcore only (save states stay enabled). All RA
+     * logic lives in port_retroachievements.c. */
+    {
+        extern int Port_RA_Init(void);
+        extern int Port_RA_TryAutoLogin(void);
+        if (Port_RA_Init() == 0) {
+            Port_RA_TryAutoLogin();
+        }
+    }
+#endif
+
     // Verify ROM region matches compiled region
 #ifdef EU
     if (gRomRegion != ROM_REGION_EU) {

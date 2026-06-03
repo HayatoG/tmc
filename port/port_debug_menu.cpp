@@ -26,6 +26,13 @@
 #include "port_debug_menu.h"
 
 extern "C" {
+#ifdef __SWITCH__
+/* RetroAchievements (issue #12) — implemented in port_retroachievements.c. */
+int Port_RA_InteractiveLogin(void);
+int Port_RA_IsLoggedIn(void);
+const char* Port_RA_UserName(void);
+void Port_RA_SimulateUnlock(void); /* debug toast, issue #25 */
+#endif
 void Port_DebugAction_GiveAllItems(void);
 void Port_DebugAction_MaxHearts(void);
 void Port_DebugAction_HealFull(void);
@@ -152,6 +159,15 @@ static const char* Tr(const char* en, const char* pt, const char* es) {
 void Toast(const std::string& msg) {
     sToast = msg;
     sToastUntilTicks = SDL_GetTicks() + 1500;
+}
+
+/* C-linkage toast for non-C++ TUs (RetroAchievements unlock announcements,
+ * port_retroachievements.c). Shows the message a bit longer than the default. */
+extern "C" void Port_RA_Toast(const char* msg) {
+    if (msg) {
+        sToast = msg;
+        sToastUntilTicks = SDL_GetTicks() + 4000;
+    }
 }
 
 /* ------- Page builders (forward-declared so actions can push pages) ------- */
@@ -515,6 +531,43 @@ MenuPage BuildDisplaySettingsPage(void) {
      *     p.items.push_back(std::move(ss));
      * }
      */
+
+#ifdef __SWITCH__
+    /* RetroAchievements (issue #12): user-triggered login. Opens the native
+     * keyboard for username/password; the label reflects whether we're logged
+     * in. Softcore only. Functions live in port_retroachievements.c. */
+    {
+        MenuItem ra;
+        ra.action = []() {
+            if (Port_RA_IsLoggedIn()) {
+                Toast(Tr("Already logged in", "Ja conectado", "Ya conectado"));
+            } else {
+                Toast(Tr("Opening keyboard...", "Abrindo teclado...", "Abriendo teclado..."));
+                Port_RA_InteractiveLogin();
+            }
+        };
+        ra.labelFn = []() {
+            if (Port_RA_IsLoggedIn()) {
+                const char* u = Port_RA_UserName();
+                return std::string(Tr("RetroAchievements: ", "RetroAchievements: ", "RetroAchievements: "))
+                       + (u ? u : "?");
+            }
+            return std::string(Tr("RetroAchievements: log in", "RetroAchievements: entrar",
+                                  "RetroAchievements: entrar"));
+        };
+        p.items.push_back(std::move(ra));
+
+        /* Debug (issue #25): fire the unlock toast without playing/server, to
+         * iterate the achievement overlay (#21/#22/#24). */
+        MenuItem raTest;
+        raTest.action = []() { Port_RA_SimulateUnlock(); };
+        raTest.labelFn = []() {
+            return std::string(Tr("RA: test unlock toast", "RA: testar toast",
+                                  "RA: probar toast"));
+        };
+        p.items.push_back(std::move(raTest));
+    }
+#endif
 
     {
         MenuItem back;

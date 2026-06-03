@@ -25,6 +25,8 @@ extern "C" void virtuappu_mode1_render_affine_obj_overlay(uint32_t* dst, int dst
  * it with C linkage at file scope — `extern "C"` is not a legal block-scope
  * declaration, so it can't go inside Port_PPU_PresentFrame. */
 extern "C" void Port_Switch_AppletTick(int* outW, int* outH, int* resized);
+/* RetroAchievements per-frame tick (issue #12); no-op until a game is loaded. */
+extern "C" void Port_RA_DoFrame(void);
 #endif
 
 /* Manual access to gMain (the engine's Main struct): including main.h
@@ -340,6 +342,11 @@ extern "C" void Port_PPU_PresentFrame(void) {
     uint8_t gbaMode;
 
 #ifdef __SWITCH__
+    /* RetroAchievements per-frame tick (issue #12): evaluates achievement
+     * conditions against emulated RAM and fires unlock events. No-op until a
+     * game is loaded / user logged in. Lives in port_retroachievements.c. */
+    Port_RA_DoFrame();
+
     /* Pump the applet message loop once per frame (required for the operation
      * mode to refresh) and resize the window on dock/undock so the present
      * below renders at native handheld 720p / docked 1080p instead of letting
