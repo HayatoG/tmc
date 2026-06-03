@@ -30,8 +30,13 @@ struct Def {
 };
 
 const std::array<Def, PORT_INPUT_COUNT> kDefaults = {{
-    { PORT_INPUT_A, "a", { "SDLK:0x00000078", "SDL_GAMEPAD:0x00000000" } },
-    { PORT_INPUT_B, "b", { "SDLK:0x0000007a", "SDL_GAMEPAD:0x00000001" } },
+    /* Face buttons follow the NINTENDO physical layout, not SDL's position-based
+     * one: SDL_GAMEPAD_BUTTON_SOUTH (0x0, bottom) is physically labelled "B" on a
+     * Switch pad, and EAST (0x1, right) is "A". Map A→EAST and B→SOUTH so the
+     * in-game A/B match the buttons printed on the controller. (Keyboard binds
+     * x/z unchanged.) */
+    { PORT_INPUT_A, "a", { "SDLK:0x00000078", "SDL_GAMEPAD:0x00000001" } },
+    { PORT_INPUT_B, "b", { "SDLK:0x0000007a", "SDL_GAMEPAD:0x00000000" } },
     { PORT_INPUT_SELECT, "select", { "SDLK:0x00000008", "SDL_GAMEPAD:0x00000004" } },
     { PORT_INPUT_START, "start", { "SDLK:0x0000000d", "SDL_GAMEPAD:0x00000006" } },
     { PORT_INPUT_RIGHT, "right", { "SDLK:0x4000004f", "SDL_GAMEPAD:0x0000000e" } },
