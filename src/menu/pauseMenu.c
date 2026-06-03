@@ -85,7 +85,21 @@ void PauseMenu_Variant0(void) {
     } while (r1 <= 0xd);
     location = GetOverworldLocation((u16)gRoomTransition.player_status.overworld_map_x,
                                     (u16)gRoomTransition.player_status.overworld_map_y);
+#ifdef PC_PORT
+    /* Crash guard (Switch Data Abort @ fault 0x0, crash report Jun 3 02:11):
+     * GetOverworldLocation returns NULL when the player's overworld_map_x/y
+     * isn't inside any gOverworldLocations region (it happens in North Hyrule
+     * Field / area 3 room 6 — the issue #28 room — where the map coords don't
+     * map to a windcrest region). The GBA original never opens this menu from
+     * such a spot, but the port reaches here with location==NULL and the
+     * unguarded `location->windcrestId` deref below faults. Sibling call sites
+     * already null-check (pauseMenuScreen6.c:238) — mirror that. */
+    if (location != NULL) {
+        gPauseMenuOptions.unk2[4] = location->windcrestId;
+    }
+#else
     gPauseMenuOptions.unk2[4] = location->windcrestId;
+#endif
     gPauseMenuOptions.unk2[5] = sub_0801DB94();
     if (IsItemEquipped(ITEM_LANTERN_ON) != EQUIP_SLOT_NONE) {
         r1 = 0x10;
@@ -130,7 +144,17 @@ void PauseMenu_Variant2(void) {
                 iVar1 = 3;
                 break;
         }
+#ifdef PC_PORT
+        /* Crash guard (Switch Data Abort @ fault addr 0x0, crash report Jun 3).
+         * field_0xc was non-NULL at the line 117 guard but reached this indexed
+         * read as NULL — the menu state can be torn down mid-frame (e.g. when
+         * the pause menu is opened while the world is in the broken-cutscene
+         * state of issue #28). Re-check right before the dereference instead of
+         * trusting the entry guard, and never index out of [0,3]. */
+        if (iVar1 >= 0 && iVar1 <= 3 && gMenu.field_0xc != NULL) {
+#else
         if (iVar1 >= 0) {
+#endif
             switch (bVar5 = gMenu.field_0xc[iVar1]) {
                 case 0:
                     break;
@@ -142,7 +166,13 @@ void PauseMenu_Variant2(void) {
                         if (iVar1 == 1) {
                             iVar4 = 2;
                         }
+#ifdef PC_PORT
+                        if (gMenu.field_0xc != NULL) {
+                            bVar5 = gMenu.field_0xc[iVar4];
+                        }
+#else
                         bVar5 = gMenu.field_0xc[iVar4];
+#endif
                     }
                 default:
                     gPauseMenuOptions.screen2 = bVar5;
