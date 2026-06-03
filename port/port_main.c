@@ -406,12 +406,29 @@ int main(int argc, char* argv[]) {
      * window flags went from 0x220 → 0x222 across the first
      * SDL_CreateRenderer call, with driver=opengl. */
 #ifdef __SWITCH__
-    /* Force SDL's software renderer on Switch. ViruaPPU already produces a CPU
-     * framebuffer, so GPU rendering buys nothing — and it avoids Mesa-generated
-     * GLES shaders that emulator shader recompilers (Eden/yuzu) can't decode.
+    /* Renderer driver choice (issue #24, GPU overlay foundation).
+     *
+     * Historically we forced "software": the ViruaPPU already produces a CPU
+     * framebuffer (so the GAME itself gains nothing from the GPU), and software
+     * avoids Mesa-generated GLES shaders that emulator shader recompilers
+     * (Eden/yuzu) can't decode.
+     *
+     * For a real-hardware-only target we instead use the GPU ("opengles2",
+     * already linked: EGL/GLESv2/glapi/drm_nouveau). The present path is already
+     * texture-based (SDL_CreateTexture + SDL_UpdateTexture(framebuffer) +
+     * SDL_RenderTexture), so the game still uploads its CPU framebuffer as a
+     * texture — but a GPU renderer lets a future overlay (icons, lists,
+     * animations) draw on the otherwise-idle GPU instead of stealing CPU from
+     * the (CPU-bound) game/audio. TMC_GPU_RENDER gates it so reverting to the
+     * emulator-safe software path is a one-flag change.
+     *
      * Set here (after Port_InitVideo, which resets render-driver hints in its
      * fallback path) and right before renderer creation so it actually sticks. */
+#ifdef TMC_GPU_RENDER
+    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengles2");
+#else
     SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
+#endif
 #endif
 
     SDL_Window* window = NULL;

@@ -40,7 +40,7 @@ ARCH := -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -ftls-model=local-
 
 DEFINES := -D__SWITCH__ -DPC_PORT -DNON_MATCHING -D$(GAME_VER) -DENGLISH -DREVISION=0 \
            -DFMT_HEADER_ONLY=1 -DTMC_PC_VERSION=\"0.2.1.1\" -DTMC_PORT_VERSION=\"0.2.1.1\" \
-           -DMODE1_GBA_WIDTH=288 -DCURL_STATICLIB
+           -DMODE1_GBA_WIDTH=288 -DCURL_STATICLIB -DTMC_GPU_RENDER
 
 # Release flavour: define TMC_RELEASE (gates SD logging in the C/C++ sources).
 ifeq ($(RELEASE),1)
