@@ -67,7 +67,12 @@ Joy-Con / Pro Controller are mapped to the GBA buttons automatically:
 | + / − | Start / Select |
 | D-Pad / Left Stick | D-Pad |
 
-You can rebind in `sdmc:/switch/tmc/config.json`.
+A / B follow the **physical Nintendo labels** (the right button is A, the bottom
+button is B), so they match what's printed on the controller rather than SDL's
+position-based naming.
+
+You can rebind in `sdmc:/switch/tmc/config.json`. The `−` (Minus) button opens
+the in-game quick-settings overlay.
 
 ---
 

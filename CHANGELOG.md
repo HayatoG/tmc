@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — 2026-06-03
+
+Switch opening-sequence fixes, validated on hardware via a new [SCENE]
+room/camera trace (live over `nxlink -s` and persisted to `tmc.log`).
+
+### Fixed (issue tracker)
+
+- **#28 North Hyrule Field: Link/Zelda invisible, cutscene to the wrong place.** Handing the sword to Zelda warps to area 3 room 6, where Link and Zelda loaded and took input (you could hear Link's shield) but were never drawn, and the camera landed wrong. NOT an entity-load failure (the issue's first theory) and NOT the PT-BR translation — the [SCENE] trace showed the room loading 10 entities + Zelda identically on a clean USA ROM. Root cause: `InitializeCamera` strips the 0x8000 scroll flag with `(target->x.HALF_U.HI * 0x10000) < 0`; `u16 * 0x10000` is signed-overflow UB and gcc 15 (aarch64) deletes the whole branch (objdump: no `and #0x7fff`). The flag survives, Link's spawn X stays e.g. `0x9365 → -27803`, off-screen. Test the bit directly (`& 0x8000`) for x and y under PC_PORT. HW-verified: player.x `-29291 → 1992`. (commit `fbac8756`)
+- **Pause menu: Data Abort (NULL deref) in North Hyrule Field.** Opening the menu there crashed in `PauseMenu_Variant0` — `location->windcrestId` with `location == NULL` from `GetOverworldLocation` (coords outside every `gOverworldLocations` region). Guard the deref like the sibling site at `pauseMenuScreen6.c:238`; same guard added in `subtaskLocalMapHint.c`. HW-verified: menu opens and saves. (commit `a888b9b7`)
+
+### Changed
+
+- **A/B follow Nintendo's physical layout.** SDL labels face buttons by position (SOUTH=bottom, EAST=right); Nintendo prints the bottom one "B" and the right one "A". Defaults bound A→SOUTH / B→EAST, so the printed A/B were swapped. Now A→EAST, B→SOUTH. Affects fresh configs only — an existing `config.json` overrides. (commit `7456d07e`)
+
+### Tooling
+
+- **[SCENE] room/camera trace (opt-in, PC_PORT, off on TMC_RELEASE).** Logs the room/area transition + cutscene pipeline (warp, LoadRoom, entity counts, StartCutscene, camera state) to `tmc.log` and, when launched via `nxlink -s`, live to the host. `tmc.log` is now APPEND so a crash+relaunch no longer truncates the trace. (commit `1a013c21`)
+
 ## 0.2.0-experimental — 2026-05-06
 
 Two-day bug-fix and tooling pass on top of 0.1.6.x. Six tracker issues closed (cucco round 9, figurine minigame, Deepwood barrels, max-hearts, Cave of Flames boss round 3, Link's house warp); F8 internal-render-scale page + sub-pixel OAM affine added; bug-report capture upgraded to PNG with auto-on-crash trigger and raw-IP/maps emit before unsafe calls; F8 "All areas (raw, by index)" warp submenu so any room is one keystroke away.

@@ -1,6 +1,23 @@
 # Switch port — TODO / roadmap
 
+## Next up — Overlay layout polish (the `-`/Minus quick-settings menu)
+The Minus (`-`) button opens the global quick-settings overlay (display
+settings + port options, rendered over file-select/name-entry/gameplay). The
+layout is functional but rough — improve the visual layout: spacing, alignment,
+grouping, readability at handheld vs docked resolutions. Code lives in
+`port_debug_menu.cpp` (the overlay renderer) and the Minus-button routing in
+`port_bios.c`. Software renderer, so keep redraw regions small (see issue #24
+for the broader "overlay from scratch" discussion). **Roadmap: 2026-06-04.**
+
 ## Done
+- **#28 North Hyrule Field opening fix** — Link/Zelda were spawning off-screen
+  (0x8000 scroll-flag UB optimized away by gcc 15 aarch64). Strip the flag with
+  a direct bit test. HW-verified. (commit `fbac8756`)
+- **Pause-menu NULL-deref crash** in North Hyrule Field (GetOverworldLocation
+  → NULL). Guarded. (commit `a888b9b7`)
+- **A/B mapped to Nintendo's physical layout** (A→EAST, B→SOUTH). (commit `7456d07e`)
+- **[SCENE] room/camera trace** — opt-in debug instrumentation, live over
+  `nxlink -s` + persisted to `tmc.log` (append). (commit `1a013c21`)
 - Native handheld 720p / docked 1080p output (`de770657`, `switch_applet.c`).
 - **Fullscreen on Switch**: window is created `SDL_WINDOW_FULLSCREEN` at the native
   resolution (`port_main.c`), so the present path fills the screen aspect-correct
