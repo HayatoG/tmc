@@ -24,6 +24,7 @@
 
 #include <stdio.h>
 #include <stdarg.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* cwd is sdmc:/switch/tmc (port_main chdir'd there before the game starts). */
@@ -48,6 +49,42 @@ static void nlog(const char* fmt, ...) { (void)fmt; }
 #endif
 
 static bool sNetReady = false;
+
+/*
+ * Show the Switch's native software keyboard and return what the user typed.
+ * `header` is the prompt line; `password` hides the input (for the RA password).
+ * Writes a NUL-terminated string into out[0..out_cap-1]. Returns 1 on OK, 0 if
+ * the user cancelled or anything failed. Used by the RetroAchievements login
+ * (port_retroachievements.c) — kept here because it needs <switch.h>.
+ */
+int Port_Swkbd_Get(const char* header, int password, char* out, size_t out_cap) {
+    if (out_cap > 0) {
+        out[0] = '\0';
+    }
+    SwkbdConfig kbd;
+    Result rc = swkbdCreate(&kbd, 0);
+    if (R_FAILED(rc)) {
+        return 0;
+    }
+    if (password) {
+        swkbdConfigMakePresetPassword(&kbd);
+    } else {
+        swkbdConfigMakePresetDefault(&kbd);
+    }
+    if (header && header[0]) {
+        /* Header text sits above the box and is easy to miss; GuideText shows
+         * inside the (empty) box as a placeholder, so set both — that's what
+         * makes it clear which field is being asked for. */
+        swkbdConfigSetHeaderText(&kbd, header);
+        swkbdConfigSetGuideText(&kbd, header);
+    }
+    rc = swkbdShow(&kbd, out, out_cap);
+    swkbdClose(&kbd);
+    if (R_FAILED(rc) || out[0] == '\0') {
+        return 0; /* cancelled or empty */
+    }
+    return 1;
+}
 
 /* Bring up the socket driver. Safe to call once at boot. Library-applet launches
  * are already rejected earlier (issue #17), so the default socket config (which
@@ -94,6 +131,95 @@ static size_t write_cb(char* ptr, size_t size, size_t nmemb, void* userdata) {
     }
     /* Always claim the full amount so curl doesn't abort on truncation. */
     return incoming;
+}
+
+/* Growable buffer for responses of unknown size (RetroAchievements PatchData can
+ * be tens of KB — a fixed buffer would silently truncate and break parsing). */
+typedef struct {
+    char*  buf;
+    size_t cap;
+    size_t len;
+} DynBuf;
+
+static size_t write_dyn_cb(char* ptr, size_t size, size_t nmemb, void* userdata) {
+    size_t incoming = size * nmemb;
+    DynBuf* d = (DynBuf*)userdata;
+    if (d->len + incoming + 1 > d->cap) {
+        size_t newcap = d->cap ? d->cap : 8192;
+        while (newcap < d->len + incoming + 1) {
+            newcap *= 2;
+        }
+        char* nb = (char*)realloc(d->buf, newcap);
+        if (!nb) {
+            return 0; /* out of memory — abort the transfer */
+        }
+        d->buf = nb;
+        d->cap = newcap;
+    }
+    memcpy(d->buf + d->len, ptr, incoming);
+    d->len += incoming;
+    d->buf[d->len] = '\0';
+    return incoming;
+}
+
+/*
+ * Blocking HTTPS request (GET if post_data is NULL, else POST) into a
+ * dynamically-grown buffer. On success *out_body points to a malloc'd,
+ * NUL-terminated body the CALLER must free(); *out_len is its length. Returns
+ * the HTTP status, or negative on transport failure (no allocation to free).
+ * This is what the rc_client server-call uses, so large PatchData never
+ * truncates.
+ */
+long Port_Net_HttpRequest(const char* url, const char* post_data, const char* content_type,
+                          char** out_body, size_t* out_len) {
+    *out_body = NULL;
+    if (out_len) {
+        *out_len = 0;
+    }
+    if (!sNetReady) {
+        nlog("[net] HttpRequest called before init\n");
+        return -1;
+    }
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        return -2;
+    }
+    DynBuf d = { NULL, 0, 0 };
+    struct curl_slist* headers = NULL;
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "TMC-Switch/0.2 (libnx curl)");
+    if (post_data) {
+        curl_easy_setopt(curl, CURLOPT_POST, 1L);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_data);
+        if (content_type && content_type[0]) {
+            char hdr[128];
+            snprintf(hdr, sizeof hdr, "Content-Type: %s", content_type);
+            headers = curl_slist_append(headers, hdr);
+            curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+        }
+    }
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_dyn_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &d);
+
+    CURLcode res = curl_easy_perform(curl);
+    long status = -3;
+    if (res == CURLE_OK) {
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+        *out_body = d.buf; /* caller frees; NULL if the body was empty */
+        if (out_len) {
+            *out_len = d.len;
+        }
+    } else {
+        nlog("[net] request failed: %s\n", curl_easy_strerror(res));
+        free(d.buf);
+    }
+    if (headers) {
+        curl_slist_free_all(headers);
+    }
+    curl_easy_cleanup(curl);
+    return status;
 }
 
 /*

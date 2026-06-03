@@ -67,7 +67,12 @@ Joy-Con / Pro Controller são mapeados para os botões do GBA automaticamente:
 | + / − | Start / Select |
 | D-Pad / Analógico esq. | D-Pad |
 
-Dá para remapear em `sdmc:/switch/tmc/config.json`.
+A e B seguem os **rótulos físicos da Nintendo** (o botão da direita é A, o de
+baixo é B), então batem com o que está impresso no controle em vez da
+nomenclatura por posição do SDL.
+
+Dá para remapear em `sdmc:/switch/tmc/config.json`. O botão `−` (Menos) abre o
+overlay de configurações rápidas no jogo.
 
 ---
 

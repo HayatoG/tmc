@@ -44,7 +44,19 @@ void sub_080A6B04(void) {
     bVar1 = ptr->mapMarkerIcon;
     uVar3 = ptr2->_c;
     uVar4 = ptr2->_e;
+#ifdef PC_PORT
+    /* GetOverworldLocation can return NULL (coords outside every
+     * gOverworldLocations region) — guard the deref like the pause-menu path
+     * does. Kinstone world-event coords normally land inside a region, so this
+     * rarely triggers, but an unguarded deref would be the same NULL fault that
+     * crashed PauseMenu_Variant0 (crash report Jun 3). */
+    {
+        const OverworldLocation* loc = GetOverworldLocation(uVar3, uVar4);
+        uVar2 = (loc != NULL) ? loc->windcrestId : 0;
+    }
+#else
     uVar2 = GetOverworldLocation(uVar3, uVar4)->windcrestId;
+#endif
     gMenu.field_0x3 = uVar2;
     gGenericMenu.unk2b = 1;
     sub_080A67C4(uVar2);

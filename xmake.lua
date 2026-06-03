@@ -517,6 +517,7 @@ target("tmc_pc")
     
 
     add_files("port/port_main.c")
+    add_files("port/port_scene_trace.c")
     add_files("port/port_audio.c")
     add_files("port/port_runtime_config.cpp")
     add_files("port/port_debug_menu.cpp")

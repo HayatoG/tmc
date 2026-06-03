@@ -49,6 +49,11 @@ void Port_Config_CycleFpsScale(int direction);
 bool Port_Config_FpsBackground(void);
 void Port_Config_ToggleFpsBackground(void);
 
+/* RetroAchievements unlock-toast visual style (issue #12). One of 6 variants:
+ * 0=Pilula 1=Cartao 2=Minimo 3=Brilho 4=Medalha 5=Vitral. Persisted. */
+int Port_Config_RaOverlayVariant(void);
+void Port_Config_CycleRaOverlayVariant(int direction);
+
 /* Overlay UI language: 0 = English, 1 = Português. Defaults to the console
  * language on Switch, persisted in config.json. */
 int Port_Config_Language(void);

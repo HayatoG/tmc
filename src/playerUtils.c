@@ -4364,13 +4364,32 @@ void InitializeCamera() {
     roomControls = &gRoomControls;
     target = gRoomControls.camera_target;
     if (target != NULL) {
+        /* issue #28: the original tests "is the 0x8000 flag set" via
+         * `(HALF_U.HI * 0x10000) < 0` — it promotes the u16 into the top of a
+         * word and checks the sign. On the GBA's old toolchain that worked, but
+         * gcc 15 (aarch64) treats `u16 * 0x10000` as signed-overflow UB and
+         * OPTIMIZES THE WHOLE BRANCH AWAY (confirmed in the disassembly: no
+         * `and #0x7fff`, just a signed `ldrsh`). So the 0x8000 scroll-flag that
+         * area-to-area scrolling transitions set (scroll.c:719,
+         * `... | 0x8000`) is never stripped, leaving Link's spawn X as e.g.
+         * 0x9365 → -27803, far off-screen: he's loaded and takes input but is
+         * never drawn, and the camera lands in the wrong place. Test the flag
+         * bit directly (no UB) so the strip happens as intended. */
+#ifdef PC_PORT
+        if ((target->x.HALF_U.HI & 0x8000) != 0) {
+#else
         if ((target->x.HALF_U.HI * 0x10000) < 0) {
+#endif
             tmp1 = (target->x.HALF.HI & 0x7fff);
             tmp1 -= gRoomControls.origin_x;
             target->x.HALF.HI = tmp1;
         }
         targetX = target->x.HALF.HI;
+#ifdef PC_PORT
+        if ((target->y.HALF_U.HI & 0x8000) != 0) {
+#else
         if ((target->y.HALF_U.HI * 0x10000) < 0) {
+#endif
             tmp2 = (target->y.HALF.HI & 0x7fff);
             tmp2 -= gRoomControls.origin_y;
             target->y.HALF.HI = tmp2;

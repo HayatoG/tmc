@@ -236,17 +236,33 @@ int main(int argc, char* argv[]) {
     mkdir("/switch", 0777);
     mkdir("/switch/tmc", 0777);
     chdir("/switch/tmc");
-    /* Capture all the port's fprintf(stderr,...) boot tracing to a file on
-     * the SD. Unbuffered so a hard freeze still leaves the last line on disk
-     * — read sdmc:/switch/tmc/tmc.log to see exactly where a hang happened.
+    /* Capture all the port's fprintf(stderr,...) tracing to a file on the SD.
+     * Unbuffered so a hard freeze still leaves the last line on disk — read
+     * sdmc:/switch/tmc/tmc.log to see exactly where a hang/crash happened.
      * Release builds (TMC_RELEASE) skip the file entirely and send stderr to
-     * /dev/null so there's no SD writes / I/O cost. */
+     * /dev/null so there's no SD writes / I/O cost.
+     *
+     * APPEND mode ("a"), not truncate ("w"): a crash that bounces back to
+     * hbmenu/sphaira and relaunches the game would otherwise truncate the log
+     * and wipe the very trace we crashed trying to capture (this is exactly how
+     * the issue #28 [SCENE] trace got lost). Each boot stamps a banner so
+     * sessions stay separable. The log is trimmed below if it grows too big. */
 #ifdef TMC_RELEASE
     freopen("/dev/null", "w", stderr);
 #else
-    freopen("tmc.log", "w", stderr);
+    /* Keep the log from growing without bound across many crash/relaunch cycles:
+     * if it's already large, start fresh; otherwise append to preserve the
+     * pre-crash trace. 2 MiB is plenty for several full sessions of [SCENE]. */
+    {
+        struct stat lst;
+        const char* mode = "a";
+        if (stat("tmc.log", &lst) == 0 && lst.st_size > (2 * 1024 * 1024)) {
+            mode = "w";
+        }
+        freopen("tmc.log", mode, stderr);
+    }
     setvbuf(stderr, NULL, _IONBF, 0);
-    fprintf(stderr, "=== TMC Switch boot log ===\n");
+    fprintf(stderr, "\n=== TMC Switch boot log ===\n");
 #endif
 
     /* Mount the .nro's embedded romfs (which carries a pre-baked asset cache)
@@ -270,6 +286,25 @@ int main(int argc, char* argv[]) {
         extern void Port_Net_Init(void);
         Port_Net_Init();
     }
+
+    /* Now that sockets are up, if we were launched via `nxlink -s`, open the
+     * host socket and hand its fd to the trace layer so every [SCENE] line is
+     * mirrored there live — IN ADDITION to the SD tmc.log. The helper redirects
+     * only stdout (not stderr), so it never clobbers our stderr→tmc.log; the
+     * trace layer write()s each line to this fd as well. Result: [SCENE] lines
+     * land in BOTH tmc.log and `nxlink -s`. Gated to debug builds (the trace
+     * layer doesn't exist on TMC_RELEASE). */
+#if !defined(TMC_RELEASE) && (!defined(SCENE_TRACE) || SCENE_TRACE)
+    {
+        extern int Port_Switch_NxlinkStdio(void);
+        extern void Port_SceneTrace_SetMirrorFd(int fd);
+        int nxfd = Port_Switch_NxlinkStdio();
+        if (nxfd >= 0) {
+            Port_SceneTrace_SetMirrorFd(nxfd);
+            fprintf(stderr, "[nxlink] stdio mirror active (fd=%d)\n", nxfd);
+        }
+    }
+#endif
 #endif
 
     /* Must run before any std::vector / new / malloc that could land in
@@ -406,12 +441,29 @@ int main(int argc, char* argv[]) {
      * window flags went from 0x220 → 0x222 across the first
      * SDL_CreateRenderer call, with driver=opengl. */
 #ifdef __SWITCH__
-    /* Force SDL's software renderer on Switch. ViruaPPU already produces a CPU
-     * framebuffer, so GPU rendering buys nothing — and it avoids Mesa-generated
-     * GLES shaders that emulator shader recompilers (Eden/yuzu) can't decode.
+    /* Renderer driver choice (issue #24, GPU overlay foundation).
+     *
+     * Historically we forced "software": the ViruaPPU already produces a CPU
+     * framebuffer (so the GAME itself gains nothing from the GPU), and software
+     * avoids Mesa-generated GLES shaders that emulator shader recompilers
+     * (Eden/yuzu) can't decode.
+     *
+     * For a real-hardware-only target we instead use the GPU ("opengles2",
+     * already linked: EGL/GLESv2/glapi/drm_nouveau). The present path is already
+     * texture-based (SDL_CreateTexture + SDL_UpdateTexture(framebuffer) +
+     * SDL_RenderTexture), so the game still uploads its CPU framebuffer as a
+     * texture — but a GPU renderer lets a future overlay (icons, lists,
+     * animations) draw on the otherwise-idle GPU instead of stealing CPU from
+     * the (CPU-bound) game/audio. TMC_GPU_RENDER gates it so reverting to the
+     * emulator-safe software path is a one-flag change.
+     *
      * Set here (after Port_InitVideo, which resets render-driver hints in its
      * fallback path) and right before renderer creation so it actually sticks. */
+#ifdef TMC_GPU_RENDER
+    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengles2");
+#else
     SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
+#endif
 #endif
 
     SDL_Window* window = NULL;
@@ -470,6 +522,24 @@ int main(int argc, char* argv[]) {
     Port_LoadRom(romPath);
     Port_EnsureAssetsReadyWithDisplay(window, gRomData, gRomSize);
     Port_CheckForUpdates(window);
+
+#ifdef __SWITCH__
+    /* RetroAchievements (issue #12): now that the ROM is in memory (gRomData),
+     * create the client and attempt a SILENT token re-login (only if the user
+     * logged in before — no keyboard, no boot block for non-RA users). The
+     * interactive keyboard login is user-triggered from the settings menu
+     * (Port_RA_InteractiveLogin). On a successful login the game's achievement
+     * set loads (hash → game id) and per-frame evaluation runs from
+     * Port_PPU_PresentFrame. Softcore only (save states stay enabled). All RA
+     * logic lives in port_retroachievements.c. */
+    {
+        extern int Port_RA_Init(void);
+        extern int Port_RA_TryAutoLogin(void);
+        if (Port_RA_Init() == 0) {
+            Port_RA_TryAutoLogin();
+        }
+    }
+#endif
 
     // Verify ROM region matches compiled region
 #ifdef EU

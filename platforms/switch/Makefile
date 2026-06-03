@@ -40,7 +40,8 @@ ARCH := -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -ftls-model=local-
 
 DEFINES := -D__SWITCH__ -DPC_PORT -DNON_MATCHING -D$(GAME_VER) -DENGLISH -DREVISION=0 \
            -DFMT_HEADER_ONLY=1 -DTMC_PC_VERSION=\"0.2.1.1\" -DTMC_PORT_VERSION=\"0.2.1.1\" \
-           -DMODE1_GBA_WIDTH=288 -DCURL_STATICLIB
+           -DMODE1_GBA_WIDTH=288 -DCURL_STATICLIB -DTMC_GPU_RENDER
+# Add -DTMC_PERF to enable the frame profiler (switch_perf.c → perf.log).
 
 # Release flavour: define TMC_RELEASE (gates SD logging in the C/C++ sources).
 ifeq ($(RELEASE),1)
@@ -60,6 +61,7 @@ INCLUDES := -Icompat \
             -I$(ROOT)/libs -I$(ROOT)/libs/ViruaPPU/include \
             -I$(ROOT)/libs/VirtuaAPU/include -I$(ROOT)/libs/agbplay_core \
             -I$(ROOT)/build/$(GAME_VER) -I$(ROOT)/tools/src/assets_extractor \
+            -I$(ROOT)/libs/rcheevos/include -I$(ROOT)/libs/rcheevos/src \
             -I$(PORTLIBS)/include -isystem $(LIBNX)/include
 
 WARN := -Wall -Wno-unknown-pragmas -Wno-unused -Wno-format
@@ -84,7 +86,46 @@ LIBS := -lSDL2 -lpng -lz -lEGL -lglapi -ldrm_nouveau \
 # libnx-thread parallel-for + background runner for on-device extraction,
 # applet lifecycle = docked resolution + HOME/sleep audio pause).
 SWITCH_SRCS := switch_stubs.c switch_romfs.c switch_parallel.c switch_applet.c \
-               switch_render_pool.c switch_net.c compat/sdl3_debug_text.c
+               switch_render_pool.c switch_net.c switch_perf.c switch_nxlink.c \
+               compat/sdl3_debug_text.c
+
+# rcheevos (RetroAchievements, issue #12) — vendored submodule, ROOT-relative so
+# the $(ROOT)/%.c rule builds them. Pure C, no external deps; _WIN32 is undefined
+# so it takes the POSIX time/pthread path (libnx-backed). Omitted: rc_libretro.c
+# (libretro-specific) and rc_client_raintegration.c (Windows toolkit only).
+RCHEEVOS_SRCS := \
+	port/port_retroachievements.c \
+	libs/rcheevos/src/rc_client.c \
+	libs/rcheevos/src/rc_compat.c \
+	libs/rcheevos/src/rc_util.c \
+	libs/rcheevos/src/rc_version.c \
+	libs/rcheevos/src/rapi/rc_api_common.c \
+	libs/rcheevos/src/rapi/rc_api_editor.c \
+	libs/rcheevos/src/rapi/rc_api_info.c \
+	libs/rcheevos/src/rapi/rc_api_runtime.c \
+	libs/rcheevos/src/rapi/rc_api_user.c \
+	libs/rcheevos/src/rcheevos/alloc.c \
+	libs/rcheevos/src/rcheevos/condition.c \
+	libs/rcheevos/src/rcheevos/condset.c \
+	libs/rcheevos/src/rcheevos/consoleinfo.c \
+	libs/rcheevos/src/rcheevos/format.c \
+	libs/rcheevos/src/rcheevos/lboard.c \
+	libs/rcheevos/src/rcheevos/memref.c \
+	libs/rcheevos/src/rcheevos/operand.c \
+	libs/rcheevos/src/rcheevos/rc_validate.c \
+	libs/rcheevos/src/rcheevos/richpresence.c \
+	libs/rcheevos/src/rcheevos/runtime_progress.c \
+	libs/rcheevos/src/rcheevos/runtime.c \
+	libs/rcheevos/src/rcheevos/trigger.c \
+	libs/rcheevos/src/rcheevos/value.c \
+	libs/rcheevos/src/rhash/aes.c \
+	libs/rcheevos/src/rhash/cdreader.c \
+	libs/rcheevos/src/rhash/hash_disc.c \
+	libs/rcheevos/src/rhash/hash_encrypted.c \
+	libs/rcheevos/src/rhash/hash_rom.c \
+	libs/rcheevos/src/rhash/hash_zip.c \
+	libs/rcheevos/src/rhash/hash.c \
+	libs/rcheevos/src/rhash/md5.c
 
 # Optional embedded romfs (pre-baked asset cache). Populated by
 # build_extractor.sh into ./romfs/. If present, elf2nro bundles it so the .nro
@@ -93,6 +134,7 @@ ROMFS_DIR := romfs
 ROMFS_ARG := $(if $(wildcard $(ROMFS_DIR)/*),--romfsdir=$(ROMFS_DIR),)
 
 OBJS := $(addprefix $(BUILD)/, $(SWITCH_SRCS:.c=.o)) \
+        $(addprefix $(BUILD)/, $(RCHEEVOS_SRCS:.c=.o)) \
         $(addprefix $(BUILD)/, $(C_SOURCES:.c=.o)) \
         $(addprefix $(BUILD)/, $(CPP_SOURCES:.cpp=.o))
 

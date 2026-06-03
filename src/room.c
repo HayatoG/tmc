@@ -20,6 +20,8 @@
 #define GE_FIELD(ent, fname) (&((GenericEntity*)(ent))->fname)
 #endif
 
+#include "port_scene_trace.h"
+
 static void sub_0804B058(EntityData* dat);
 extern void sub_0801AC98(void);
 extern u32 EnemyEnableRespawn(u32);
@@ -55,6 +57,19 @@ static void LoadGrassDropTile(TileEntity*);
 static void LoadLocationTile(TileEntity*);
 
 void LoadRoomEntityList(const EntityData* listPtr) {
+#if SCENE_TRACE
+    if (listPtr == NULL) {
+        SCENE_LOG("LoadRoomEntityList: list=NULL (no entities to spawn)");
+    } else {
+        int count = 0;
+        const EntityData* p = listPtr;
+        while (p->kind != 0xFF && count < 0x400) {
+            count++;
+            p++;
+        }
+        SCENE_LOG("LoadRoomEntityList: list=%p count=%d", (const void*)listPtr, count);
+    }
+#endif
     if (listPtr != NULL) {
         while (listPtr->kind != 0xFF) {
             LoadRoomEntity(listPtr++);
@@ -306,6 +321,10 @@ void CallRoomProp5And7(void) {
 }
 
 void LoadRoom(void) {
+#if SCENE_TRACE
+    SCENE_LOG("LoadRoom: area=%u room=%u props[0]=%p props[1]=%p props[3]=%p", gRoomControls.area, gRoomControls.room,
+              GetCurrentRoomProperty(0), GetCurrentRoomProperty(1), GetCurrentRoomProperty(3));
+#endif
     LoadRoomEntityList(GetCurrentRoomProperty(1));
     LoadRoomEntityList(GetCurrentRoomProperty(0));
 

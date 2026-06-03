@@ -30,8 +30,13 @@ struct Def {
 };
 
 const std::array<Def, PORT_INPUT_COUNT> kDefaults = {{
-    { PORT_INPUT_A, "a", { "SDLK:0x00000078", "SDL_GAMEPAD:0x00000000" } },
-    { PORT_INPUT_B, "b", { "SDLK:0x0000007a", "SDL_GAMEPAD:0x00000001" } },
+    /* Face buttons follow the NINTENDO physical layout, not SDL's position-based
+     * one: SDL_GAMEPAD_BUTTON_SOUTH (0x0, bottom) is physically labelled "B" on a
+     * Switch pad, and EAST (0x1, right) is "A". Map A→EAST and B→SOUTH so the
+     * in-game A/B match the buttons printed on the controller. (Keyboard binds
+     * x/z unchanged.) */
+    { PORT_INPUT_A, "a", { "SDLK:0x00000078", "SDL_GAMEPAD:0x00000001" } },
+    { PORT_INPUT_B, "b", { "SDLK:0x0000007a", "SDL_GAMEPAD:0x00000000" } },
     { PORT_INPUT_SELECT, "select", { "SDLK:0x00000008", "SDL_GAMEPAD:0x00000004" } },
     { PORT_INPUT_START, "start", { "SDLK:0x0000000d", "SDL_GAMEPAD:0x00000006" } },
     { PORT_INPUT_RIGHT, "right", { "SDLK:0x4000004f", "SDL_GAMEPAD:0x0000000e" } },
@@ -63,6 +68,10 @@ int sFpsScale = 1;
 /* Dark semi-transparent panel behind the FPS counter for legibility over
  * bright backgrounds (off by default). */
 bool sFpsBackground = false;
+/* RetroAchievements unlock-toast visual style (issue #12 overlay work). One of
+ * 6 variants ported from the web mockup; 0=Pilula 1=Cartao 2=Minimo 3=Brilho
+ * 4=Medalha 5=Vitral. Default Cartao (the most complete: progress + rarity). */
+int sRaOverlayVariant = 1;
 /* Overlay UI language: 0 = English, 1 = Português. Defaults to the console
  * language on first run (see Port_Config_DefaultLanguage), then persists. */
 int sLanguage = -1; /* -1 = not yet resolved; resolved on first access/load */
@@ -89,6 +98,7 @@ nlohmann::json DefaultsJson(void) {
         { "fps_corner", 0 },
         { "fps_scale", 1 },
         { "fps_background", false },
+        { "ra_overlay_variant", 1 },
         { "bindings", nlohmann::json::object() },
     };
     for (const auto& d : kDefaults) {
@@ -232,6 +242,8 @@ extern "C" void Port_Config_Load(const char* path) {
     int fpsScale = j.value("fps_scale", 1);
     sFpsScale = fpsScale >= 1 && fpsScale <= 4 ? fpsScale : 1;
     sFpsBackground = j.value("fps_background", false);
+    int raVariant = j.value("ra_overlay_variant", 1);
+    sRaOverlayVariant = raVariant >= 0 && raVariant <= 5 ? raVariant : 1;
     /* If config.json carries an explicit language, honour it; otherwise leave
      * sLanguage = -1 so the first Port_Config_Language() resolves the console
      * default. Range-check to {0,1}. */
@@ -299,6 +311,17 @@ extern "C" void Port_Config_CycleFpsCorner(int direction) {
     int step = direction < 0 ? -1 : 1;
     sFpsCorner = (sFpsCorner + step + 4) % 4; /* wrap through the 4 corners */
     sConfigJson["fps_corner"] = sFpsCorner;
+    SaveConfig();
+}
+
+extern "C" int Port_Config_RaOverlayVariant(void) {
+    return sRaOverlayVariant;
+}
+
+extern "C" void Port_Config_CycleRaOverlayVariant(int direction) {
+    int step = direction < 0 ? -1 : 1;
+    sRaOverlayVariant = (sRaOverlayVariant + step + 6) % 6; /* wrap through the 6 variants */
+    sConfigJson["ra_overlay_variant"] = sRaOverlayVariant;
     SaveConfig();
 }
 

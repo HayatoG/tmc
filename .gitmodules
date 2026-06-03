@@ -11,3 +11,6 @@
 	path = libs/VirtuaAPU
 	url = https://github.com/MatheoVignaud/VirtuaAPU.git
   ignore = dirty
+[submodule "libs/rcheevos"]
+	path = libs/rcheevos
+	url = https://github.com/RetroAchievements/rcheevos.git
