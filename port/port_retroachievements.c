@@ -157,19 +157,42 @@ static void server_call(const rc_api_request_t* request,
 }
 
 /* ----- events (unlock toasts) ------------------------------------------- */
-/* A C-linkage toast helper implemented over the overlay's Toast() (debug menu).
- * Shows a short on-screen message — used to announce achievement unlocks. */
+/* C-linkage toast helpers over the debug-menu overlay. Port_RA_Toast is the
+ * legacy plain-string form; Port_RA_ToastRich drives the styled achievement
+ * overlay (issue #12) with the real title/points/game/progress so the variants
+ * (Pilula/Cartao/...) can show tier colour, XP and rarity. */
 extern void Port_RA_Toast(const char* msg);
+extern void Port_RA_ToastRich(const char* title, const char* game, int points,
+                              float rarity, int unlocked, int total);
+
+/* Pull the current game title + core progress (unlocked/total) so the overlay
+ * card can show "n/total" and the game name. Cheap; called only on unlock. */
+static void ra_game_context(const char** out_game, int* out_unlocked, int* out_total) {
+    *out_game = "";
+    *out_unlocked = 0;
+    *out_total = 0;
+    if (!sClient) return;
+    const rc_client_game_t* g = rc_client_get_game_info(sClient);
+    if (g && g->title) *out_game = g->title;
+    rc_client_user_game_summary_t summary;
+    memset(&summary, 0, sizeof summary);
+    rc_client_get_user_game_summary(sClient, &summary);
+    *out_unlocked = (int)summary.num_unlocked_achievements;
+    *out_total = (int)summary.num_core_achievements;
+}
 
 static void event_handler(const rc_client_event_t* event, rc_client_t* client) {
     (void)client;
     switch (event->type) {
         case RC_CLIENT_EVENT_ACHIEVEMENT_TRIGGERED:
             if (event->achievement && event->achievement->title) {
-                char msg[160];
-                snprintf(msg, sizeof msg, "Achievement: %s", event->achievement->title);
-                Port_RA_Toast(msg);
-                ralog("[ra] unlocked: %s\n", event->achievement->title);
+                const rc_client_achievement_t* a = event->achievement;
+                const char* game; int unlocked, total;
+                ra_game_context(&game, &unlocked, &total);
+                Port_RA_ToastRich(a->title, game, (int)a->points,
+                                  a->rarity, unlocked, total);
+                ralog("[ra] unlocked: %s (%u pts, %.1f%%)\n",
+                      a->title, a->points, a->rarity);
             }
             break;
         case RC_CLIENT_EVENT_GAME_COMPLETED:
@@ -186,8 +209,21 @@ static void event_handler(const rc_client_event_t* event, rc_client_t* client) {
  * title from the loaded set if available (so it looks authentic); otherwise a
  * placeholder. Does NOT unlock anything on the user's RA account. */
 void Port_RA_SimulateUnlock(void) {
-    const char* title = "Test Achievement";
+    /* Defaults: plausible values so the overlay (tier colour, XP, rarity,
+     * progress) looks authentic even with no game/login. 50 pts -> Ouro. */
+    const char* title = "Conquista de Teste";
+    const char* game  = "The Minish Cap";
+    int   points   = 50;
+    float rarity   = 7.3f;
+    int   unlocked = 12;
+    int   total    = 40;
+
     if (sClient) {
+        const char* g; int u, t;
+        ra_game_context(&g, &u, &t);
+        if (g && g[0]) game = g;
+        if (t > 0) { unlocked = u; total = t; }
+
         rc_client_achievement_list_t* list = rc_client_create_achievement_list(
             sClient, RC_CLIENT_ACHIEVEMENT_CATEGORY_CORE,
             RC_CLIENT_ACHIEVEMENT_LIST_GROUPING_PROGRESS);
@@ -197,17 +233,20 @@ void Port_RA_SimulateUnlock(void) {
             if (a && a->title) {
                 static char held[160];
                 snprintf(held, sizeof held, "%s", a->title);
-                title = held;
+                title  = held;
+                /* Keep the demo's non-zero values when the real achievement
+                 * carries 0 (some RA achievements are worth 0 pts / have no
+                 * rarity yet) so the preview always shows XP + tier colour. */
+                if (a->points > 0) points = (int)a->points;
+                if (a->rarity > 0.0f) rarity = a->rarity;
             }
         }
         if (list) {
             rc_client_destroy_achievement_list(list);
         }
     }
-    char msg[200];
-    snprintf(msg, sizeof msg, "Achievement: %s", title);
-    Port_RA_Toast(msg);
-    ralog("[ra] simulated unlock toast: %s\n", title);
+    Port_RA_ToastRich(title, game, points, rarity, unlocked, total);
+    ralog("[ra] simulated unlock: %s (%d pts, %.1f%%)\n", title, points, rarity);
 }
 
 /* ----- per-frame tick --------------------------------------------------- */

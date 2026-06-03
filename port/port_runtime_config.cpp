@@ -68,6 +68,10 @@ int sFpsScale = 1;
 /* Dark semi-transparent panel behind the FPS counter for legibility over
  * bright backgrounds (off by default). */
 bool sFpsBackground = false;
+/* RetroAchievements unlock-toast visual style (issue #12 overlay work). One of
+ * 6 variants ported from the web mockup; 0=Pilula 1=Cartao 2=Minimo 3=Brilho
+ * 4=Medalha 5=Vitral. Default Cartao (the most complete: progress + rarity). */
+int sRaOverlayVariant = 1;
 /* Overlay UI language: 0 = English, 1 = Português. Defaults to the console
  * language on first run (see Port_Config_DefaultLanguage), then persists. */
 int sLanguage = -1; /* -1 = not yet resolved; resolved on first access/load */
@@ -94,6 +98,7 @@ nlohmann::json DefaultsJson(void) {
         { "fps_corner", 0 },
         { "fps_scale", 1 },
         { "fps_background", false },
+        { "ra_overlay_variant", 1 },
         { "bindings", nlohmann::json::object() },
     };
     for (const auto& d : kDefaults) {
@@ -237,6 +242,8 @@ extern "C" void Port_Config_Load(const char* path) {
     int fpsScale = j.value("fps_scale", 1);
     sFpsScale = fpsScale >= 1 && fpsScale <= 4 ? fpsScale : 1;
     sFpsBackground = j.value("fps_background", false);
+    int raVariant = j.value("ra_overlay_variant", 1);
+    sRaOverlayVariant = raVariant >= 0 && raVariant <= 5 ? raVariant : 1;
     /* If config.json carries an explicit language, honour it; otherwise leave
      * sLanguage = -1 so the first Port_Config_Language() resolves the console
      * default. Range-check to {0,1}. */
@@ -304,6 +311,17 @@ extern "C" void Port_Config_CycleFpsCorner(int direction) {
     int step = direction < 0 ? -1 : 1;
     sFpsCorner = (sFpsCorner + step + 4) % 4; /* wrap through the 4 corners */
     sConfigJson["fps_corner"] = sFpsCorner;
+    SaveConfig();
+}
+
+extern "C" int Port_Config_RaOverlayVariant(void) {
+    return sRaOverlayVariant;
+}
+
+extern "C" void Port_Config_CycleRaOverlayVariant(int direction) {
+    int step = direction < 0 ? -1 : 1;
+    sRaOverlayVariant = (sRaOverlayVariant + step + 6) % 6; /* wrap through the 6 variants */
+    sConfigJson["ra_overlay_variant"] = sRaOverlayVariant;
     SaveConfig();
 }
 

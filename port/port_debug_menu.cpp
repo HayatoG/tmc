@@ -71,6 +71,8 @@ bool          Port_Config_FpsBackground(void);
 void          Port_Config_ToggleFpsBackground(void);
 int           Port_Config_Language(void);          /* 0 = EN, 1 = PT */
 void          Port_Config_CycleLanguage(int direction);
+int           Port_Config_RaOverlayVariant(void);  /* 0..5, see kRaVariantNames */
+void          Port_Config_CycleRaOverlayVariant(int direction);
 
 /* Soft-slot equip-button assignments (port_softslots.c). */
 const char*   Port_SoftSlots_GetSlotLabel(int slot);
@@ -136,6 +138,75 @@ std::vector<MenuPage> sPageStack;
 std::string sToast;            /* Temporary message shown at bottom of screen. */
 unsigned int sToastUntilTicks = 0;
 
+/* ===================================================================== *
+ *  RetroAchievements unlock overlay (issue #12)
+ *
+ *  A richer, animated toast for achievement unlocks — ported from the web
+ *  mockup (RA - Switch). Six visual variants, selectable in the display menu
+ *  and persisted (Port_Config_RaOverlayVariant). Drawn with the same SDL
+ *  Renderer 2D vocabulary the menu/toast already use:
+ *    - SDL_RenderFillRect  -> panels / glow layers / progress bars
+ *    - SDL_SetRenderDrawColor + BLENDMODE_BLEND -> translucency (glass approx)
+ *    - SDL_RenderDebugText -> labels (8x8 ASCII font, scaled on Switch)
+ *
+ *  What the web mockup does in CSS that we approximate here:
+ *    - backdrop blur (glass)   -> dark translucent panel
+ *    - box-shadow glow         -> concentric rects with decreasing alpha
+ *    - SVG trophy / ring / hex -> simple rect-based glyph; ring/hex squared off
+ *    - shimmer sweep (Brilho)  -> a bright vertical band swept across by time
+ *  The bitmap font has no accents and no weight axis, so copy is ASCII.
+ * ===================================================================== */
+
+/* Tier palette, ported from data.js TIERS. RGB only (alpha is applied per
+ * draw). Order matches the rc tier hints we map from points. */
+struct RaTier {
+    const char* label;
+    Uint8 mr, mg, mb;   /* main accent */
+    Uint8 lr, lg, lb;   /* light (highlights / text) */
+    Uint8 dr, dg, db;   /* deep (trophy well) */
+};
+constexpr RaTier kRaTiers[4] = {
+    /* bronze  */ { "Bronze",  0xC7,0x7F,0x45,  0xFB,0xD9,0xB4,  0x6E,0x42,0x20 },
+    /* prata   */ { "Prata",   0xAA,0xB6,0xC6,  0xF0,0xF5,0xFC,  0x5A,0x66,0x76 },
+    /* ouro    */ { "Ouro",    0xEE,0xBE,0x45,  0xFF,0xEB,0xAE,  0x8E,0x6C,0x18 },
+    /* platina */ { "Platina", 0x7F,0xD6,0xE2,  0xE2,0xFB,0xFF,  0x2D,0x6E,0x7A },
+};
+
+/* A live achievement-unlock toast. Populated by Port_RA_Toast / the rich
+ * unlock path; rendered each frame until it expires (then fades out). */
+struct RaToast {
+    bool         active = false;
+    char         name[96] = {0};   /* achievement title */
+    char         game[96] = {0};   /* game title */
+    bool         hasPoints = false;/* true = points is real (show even if 0) */
+    int          points = 0;
+    int          tier = 0;         /* index into kRaTiers */
+    float        rarity = 0.0f;    /* % who unlocked (0 = unknown/hide) */
+    int          unlocked = 0;     /* progress numerator (0 = hide progress) */
+    int          total = 0;        /* progress denominator */
+    unsigned int shownAt = 0;      /* SDL_GetTicks when it appeared */
+    unsigned int until = 0;        /* SDL_GetTicks when it should start leaving */
+};
+RaToast sRaToast;
+
+/* Animation timing (mirrors the mockup's 0.62s in / 0.44s out easing). */
+constexpr unsigned int kRaInMs  = 420;
+constexpr unsigned int kRaOutMs = 360;
+
+/* Variant display names, indexed by Port_Config_RaOverlayVariant (0..5). */
+const char* const kRaVariantNames[6] = {
+    "Pilula", "Cartao", "Minimo", "Brilho", "Medalha", "Vitral",
+};
+
+/* Map RetroAchievements points to a tier index, mirroring the mockup's feel
+ * (more points = rarer = higher tier). rc_client gives us points, not a tier. */
+static int RaTierForPoints(int pts) {
+    if (pts >= 100) return 3; /* platina */
+    if (pts >= 50)  return 2; /* ouro    */
+    if (pts >= 25)  return 1; /* prata   */
+    return 0;                 /* bronze  */
+}
+
 /* Items in sPageStack store std::function lambdas. Clearing the stack
  * inside one of those lambdas would destroy the std::function whose body
  * is currently executing — even though the executing copy is a local,
@@ -161,12 +232,52 @@ void Toast(const std::string& msg) {
     sToastUntilTicks = SDL_GetTicks() + 1500;
 }
 
+/* Populate + arm the rich RA unlock overlay. Shared by the structured C entry
+ * point and the legacy string Toast fallback. duration is how long it stays
+ * fully visible before fading. */
+static void RaArmToast(const char* name, const char* game, int points, bool hasPoints,
+                       float rarity, int unlocked, int total, unsigned int durationMs) {
+    sRaToast = RaToast{};  /* value-init (RaToast is non-trivial) */
+    std::snprintf(sRaToast.name, sizeof sRaToast.name, "%s", name ? name : "Conquista");
+    std::snprintf(sRaToast.game, sizeof sRaToast.game, "%s", game ? game : "");
+    sRaToast.hasPoints = hasPoints;
+    sRaToast.points   = points;
+    sRaToast.tier     = RaTierForPoints(points);
+    sRaToast.rarity   = rarity;
+    sRaToast.unlocked = unlocked;
+    sRaToast.total    = total;
+    unsigned int now  = SDL_GetTicks();
+    sRaToast.shownAt  = now;
+    sRaToast.until    = now + durationMs;
+    sRaToast.active   = true;
+}
+
+/* C-linkage structured unlock entry point (issue #12 overlay). The RA event
+ * handler in port_retroachievements.c calls this with the real achievement
+ * fields so the overlay shows title/points/game/progress. game/rarity/progress
+ * may be empty/zero when unknown — the variants hide those bits gracefully. */
+extern "C" void Port_RA_ToastRich(const char* title, const char* game, int points,
+                                  float rarity, int unlocked, int total) {
+    /* Structured path: points is authoritative — show it even when 0. */
+    RaArmToast(title, game, points, true, rarity, unlocked, total, 4500);
+}
+
 /* C-linkage toast for non-C++ TUs (RetroAchievements unlock announcements,
- * port_retroachievements.c). Shows the message a bit longer than the default. */
+ * port_retroachievements.c). Legacy string form: also feeds the rich overlay
+ * so even the plain "Achievement: X" path gets the new look. Strips a leading
+ * "Achievement: " / "Conquista: " prefix to recover the bare title. */
 extern "C" void Port_RA_Toast(const char* msg) {
     if (msg) {
         sToast = msg;
         sToastUntilTicks = SDL_GetTicks() + 4000;
+        const char* title = msg;
+        const char* colon = std::strchr(msg, ':');
+        if (colon && colon[1]) {
+            title = colon + 1;
+            while (*title == ' ') ++title;
+        }
+        /* Legacy string path: points unknown — hide the XP block. */
+        RaArmToast(title, "", 0, false, 0.0f, 0, 0, 4000);
     }
 }
 
@@ -518,6 +629,30 @@ MenuPage BuildDisplaySettingsPage(void) {
         p.items.push_back(std::move(fpsBg));
     }
 
+#ifdef __SWITCH__
+    /* RetroAchievements unlock overlay style (issue #12). Cycle through the 6
+     * ported variants; Left/Right also previews the choice by firing a test
+     * toast so you see it immediately as you scroll. */
+    {
+        MenuItem raStyle;
+        auto preview = [](int dir) {
+            Port_Config_CycleRaOverlayVariant(dir);
+            Port_RA_SimulateUnlock();
+        };
+        raStyle.cycleLeft  = [preview]() { preview(-1); };
+        raStyle.cycleRight = [preview]() { preview(+1); };
+        raStyle.labelFn = []() {
+            int v = Port_Config_RaOverlayVariant();
+            if (v < 0 || v > 5) v = 1;
+            char buf[48];
+            std::snprintf(buf, sizeof(buf), "%s %s",
+                          Tr("RA overlay", "Overlay RA", "Overlay RA"), kRaVariantNames[v]);
+            return std::string(buf);
+        };
+        p.items.push_back(std::move(raStyle));
+    }
+#endif
+
     /* Save states — TEMPORARILY DISABLED. The in-memory snapshot still crashes
      * on the save→load→cross-room path (script-context side-table gap fixed, but
      * not yet verified end-to-end on hardware). Hidden from the menu until the
@@ -857,12 +992,342 @@ static int Port_DebugMenu_CharW(SDL_Renderer* renderer) {
 #endif
 }
 
+/* ===================================================================== *
+ *  RA overlay — drawing helpers + the six variants.
+ *
+ *  Everything is sized off `u`, a single unit derived from the glyph cell, so
+ *  the overlay scales with the display the same way the menu does. Geometry
+ *  numbers come from the mockup's cqh/cqw values, rescaled to the 8x8 font.
+ * ===================================================================== */
+
+static inline SDL_FRect RaRect(float x, float y, float w, float h) {
+    SDL_FRect r = { x, y, w, h };
+    return r;
+}
+
+static void RaFill(SDL_Renderer* r, SDL_FRect rect, Uint8 cr, Uint8 cg, Uint8 cb, Uint8 ca) {
+    SDL_SetRenderDrawColor(r, cr, cg, cb, ca);
+    SDL_RenderFillRect(r, &rect);
+}
+
+/* Glass panel: dark translucent fill + a 1px light top edge (the inset
+ * highlight the mockup's .glass uses) + a faint border. Approximates blur. */
+static void RaGlassPanel(SDL_Renderer* r, SDL_FRect box, Uint8 borderAlpha) {
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+    RaFill(r, box, 22, 24, 32, 214);                 /* body */
+    RaFill(r, RaRect(box.x, box.y, box.w, 1.0f), 255, 255, 255, 46); /* top sheen */
+    SDL_SetRenderDrawColor(r, 255, 255, 255, borderAlpha);
+    SDL_RenderRect(r, &box);
+}
+
+/* Accent glow: concentric outlines around `box` in the tier colour, fading
+ * out — the rect-based stand-in for the mockup's box-shadow glow. */
+static void RaGlow(SDL_Renderer* r, SDL_FRect box, const RaTier& t, int layers, float step) {
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+    for (int i = layers; i >= 1; --i) {
+        float g = step * i;
+        SDL_FRect o = RaRect(box.x - g, box.y - g, box.w + 2*g, box.h + 2*g);
+        Uint8 a = (Uint8)(70 / (i + 1));
+        SDL_SetRenderDrawColor(r, t.mr, t.mg, t.mb, a);
+        SDL_RenderRect(r, &o);
+    }
+}
+
+/* Trophy glyph: a rounded well (radial-ish via two stacked rects) with a cup
+ * shape built from rects, tinted by tier. No SVG — a compact rect mosaic that
+ * reads as a trophy at overlay scale. `s` is the cell side. */
+static void RaTrophy(SDL_Renderer* r, float x, float y, float s, const RaTier& t) {
+    /* well background */
+    RaFill(r, RaRect(x, y, s, s), t.dr, t.dg, t.db, 235);
+    RaFill(r, RaRect(x, y, s, s*0.45f), t.dr/2, t.dg/2, t.db/2, 120);
+    float cx = x + s * 0.5f;
+    float cupW = s * 0.50f, cupH = s * 0.34f;
+    /* cup bowl */
+    RaFill(r, RaRect(cx - cupW*0.5f, y + s*0.22f, cupW, cupH), t.mr, t.mg, t.mb, 255);
+    /* highlight */
+    RaFill(r, RaRect(cx - cupW*0.5f, y + s*0.22f, cupW*0.34f, cupH*0.8f), t.lr, t.lg, t.lb, 200);
+    /* handles */
+    RaFill(r, RaRect(cx - cupW*0.5f - s*0.10f, y + s*0.26f, s*0.08f, cupH*0.6f), t.mr, t.mg, t.mb, 230);
+    RaFill(r, RaRect(cx + cupW*0.5f + s*0.02f, y + s*0.26f, s*0.08f, cupH*0.6f), t.mr, t.mg, t.mb, 230);
+    /* stem + base */
+    RaFill(r, RaRect(cx - s*0.05f, y + s*0.56f, s*0.10f, s*0.12f), t.db, t.dg, t.db, 255);
+    RaFill(r, RaRect(cx - cupW*0.45f, y + s*0.68f, cupW*0.9f, s*0.10f), t.mr, t.mg, t.mb, 235);
+}
+
+/* Progress bar: track + tier-filled portion + "n/total" text to the right. */
+static void RaProgressBar(SDL_Renderer* r, float x, float y, float w, float h,
+                          int unlocked, int total, const RaTier& t, int charW) {
+    RaFill(r, RaRect(x, y, w, h), 255, 255, 255, 30);
+    if (total > 0) {
+        float pct = (float)unlocked / (float)total;
+        if (pct < 0.0f) pct = 0.0f;
+        if (pct > 1.0f) pct = 1.0f;
+        RaFill(r, RaRect(x, y, w * pct, h), t.mr, t.mg, t.mb, 255);
+    }
+    char buf[24];
+    std::snprintf(buf, sizeof buf, "%d/%d", unlocked, total);
+    SDL_SetRenderDrawColor(r, 220, 220, 230, 255);
+    SDL_RenderDebugText(r, x + w + charW * 0.6f, y + (h - charW) * 0.5f, buf);
+}
+
+static void RaText(SDL_Renderer* r, float x, float y, const char* s,
+                   Uint8 cr, Uint8 cg, Uint8 cb, Uint8 ca = 255) {
+    SDL_SetRenderDrawColor(r, cr, cg, cb, ca);
+    SDL_RenderDebugText(r, x, y, s);
+}
+
+/* Eased progress 0..1 of the in/out animation. Returns alpha [0..1] and a
+ * slide offset (in px) applied along the variant's entry direction. dirLeft
+ * slides from the left edge; otherwise from the top. */
+struct RaAnim { float alpha; float dx; float dy; };
+static RaAnim RaComputeAnim(const RaToast& to, bool dirLeft, float slidePx, unsigned int now) {
+    RaAnim a = { 1.0f, 0.0f, 0.0f };
+    if (now < to.shownAt + kRaInMs) {
+        float p = (float)(now - to.shownAt) / (float)kRaInMs;
+        float e = 1.0f - (1.0f - p) * (1.0f - p) * (1.0f - p); /* ease-out cubic */
+        a.alpha = e;
+        float off = (1.0f - e) * slidePx;
+        if (dirLeft) a.dx = -off; else a.dy = -off;
+    } else if (now >= to.until) {
+        float p = (float)(now - to.until) / (float)kRaOutMs;
+        if (p > 1.0f) p = 1.0f;
+        a.alpha = 1.0f - p;
+        float off = p * slidePx * 0.5f;
+        if (dirLeft) a.dx = -off; else a.dy = -off;
+    }
+    return a;
+}
+
+/* Each variant draws into the box at (ox,oy). They share the atoms above and
+ * differ in layout / chrome, matching VPilula..VVitral in overlays.jsx. */
+
+static void RaDrawPilula(SDL_Renderer* r, float ox, float oy, const RaToast& to,
+                         const RaTier& t, int charW, Uint8 A) {
+    float pad = charW * 0.9f;
+    float ts = charW * 2.6f;
+    float bodyX = ox + pad + ts + charW;
+    int nameLen = (int)std::strlen(to.name);
+    int gameLen = (int)std::strlen(to.game);
+    float textW = (float)std::max(nameLen, gameLen + 8) * charW;
+    float w = pad + ts + charW + textW + charW * 5.0f + pad;
+    float h = ts + pad * 2.0f;
+    SDL_FRect box = RaRect(ox, oy, w, h);
+    RaGlassPanel(r, box, (Uint8)(36 * A / 255));
+    RaTrophy(r, ox + pad, oy + pad, ts, t);
+    RaText(r, bodyX, oy + pad, "CONQUISTA DESBLOQUEADA", t.lr, t.lg, t.lb, A);
+    RaText(r, bodyX, oy + pad + charW * 1.4f, to.name, 255, 255, 255, A);
+    RaText(r, bodyX, oy + pad + charW * 2.8f, to.game, 190, 195, 205, A);
+    /* XP ("50 XP"), one line, right-aligned. Hidden when unknown (0 pts). */
+    if (to.hasPoints) {
+        char xp[24]; std::snprintf(xp, sizeof xp, "%d XP", to.points);
+        float xpW = (float)std::strlen(xp) * charW;
+        RaText(r, ox + w - pad - xpW, oy + h * 0.5f - charW * 0.5f, xp, t.lr, t.lg, t.lb, A);
+    }
+}
+
+static void RaDrawCartao(SDL_Renderer* r, float ox, float oy, const RaToast& to,
+                         const RaTier& t, int charW, Uint8 A) {
+    float pad = charW * 1.0f;
+    float ts = charW * 3.0f;
+    int nameLen = (int)std::strlen(to.name);
+    int gameLen = (int)std::strlen(to.game);
+    float textW = (float)std::max(nameLen, gameLen) * charW;
+    float w = pad + ts + charW + textW + charW * 6.0f + pad;
+    if (w < charW * 34) w = charW * 34;
+    float topH = ts;
+    float footH = charW * 2.4f;
+    float h = pad + topH + charW * 1.2f + footH + pad;
+    SDL_FRect box = RaRect(ox, oy, w, h);
+    RaGlassPanel(r, box, (Uint8)(36 * A / 255));
+    /* top row */
+    RaTrophy(r, ox + pad, oy + pad, ts, t);
+    float bodyX = ox + pad + ts + charW;
+    char kick[40]; std::snprintf(kick, sizeof kick, "CONQUISTA - %s", t.label);
+    RaText(r, bodyX, oy + pad, kick, t.lr, t.lg, t.lb, A);
+    RaText(r, bodyX, oy + pad + charW * 1.4f, to.name, 255, 255, 255, A);
+    RaText(r, bodyX, oy + pad + charW * 2.8f, to.game, 190, 195, 205, A);
+    /* XP, single line ("+50 XP"), right-aligned. Hidden when unknown (0 pts). */
+    if (to.hasPoints) {
+        char xp[24]; std::snprintf(xp, sizeof xp, "+%d XP", to.points);
+        float xpW = (float)std::strlen(xp) * charW;
+        RaText(r, ox + w - pad - xpW, oy + pad, xp, t.lr, t.lg, t.lb, A);
+    }
+    /* divider */
+    float footY = oy + pad + topH + charW * 0.6f;
+    RaFill(r, RaRect(ox + pad, footY, w - pad * 2.0f, 1.0f), 255, 255, 255, (Uint8)(26 * A / 255));
+    /* foot: progress + rarity */
+    float fY = footY + charW * 0.8f;
+    if (to.total > 0)
+        RaProgressBar(r, ox + pad, fY, w * 0.40f, charW * 0.9f, to.unlocked, to.total, t, charW);
+    if (to.rarity > 0.0f) {
+        char rar[40]; std::snprintf(rar, sizeof rar, "%.1f%% desbloquearam", to.rarity);
+        float rx = ox + w - pad - (float)std::strlen(rar) * charW - charW * 1.4f;
+        RaFill(r, RaRect(rx, fY + charW * 0.1f, charW * 0.7f, charW * 0.7f), t.mr, t.mg, t.mb, A);
+        RaText(r, rx + charW * 1.2f, fY, rar, 200, 205, 215, A);
+    }
+}
+
+static void RaDrawMinimo(SDL_Renderer* r, float ox, float oy, const RaToast& to,
+                         const RaTier& t, int charW, Uint8 A) {
+    float pad = charW * 0.7f;
+    float ts = charW * 1.6f;
+    char line[200];
+    std::snprintf(line, sizeof line, "%s", to.name);
+    int len = (int)std::strlen(line) + (int)std::strlen(to.game) + 12;
+    float w = pad + ts + charW * 0.6f + (float)len * charW + pad;
+    float h = ts + pad * 2.0f;
+    SDL_FRect box = RaRect(ox, oy, w, h);
+    RaGlassPanel(r, box, (Uint8)(30 * A / 255));
+    RaTrophy(r, ox + pad, oy + pad, ts, t);
+    float tx = ox + pad + ts + charW * 0.6f;
+    float ty = oy + h * 0.5f - charW * 0.5f;
+    RaText(r, tx, ty, to.name, 255, 255, 255, A);
+    float gx = tx + (float)std::strlen(to.name) * charW + charW;
+    RaFill(r, RaRect(gx - charW * 0.4f, ty + charW * 0.3f, charW * 0.35f, charW * 0.35f), 200, 200, 210, (Uint8)(140 * A / 255));
+    RaText(r, gx + charW * 0.4f, ty, to.game, 175, 180, 190, A);
+    char xp[16]; std::snprintf(xp, sizeof xp, "+%d", to.points);
+    RaText(r, ox + w - pad - (float)std::strlen(xp) * charW, ty, xp, t.lr, t.lg, t.lb, A);
+}
+
+static void RaDrawBrilho(SDL_Renderer* r, float ox, float oy, const RaToast& to,
+                         const RaTier& t, int charW, Uint8 A, unsigned int now) {
+    float pad = charW * 0.9f;
+    float ts = charW * 2.8f;
+    float bodyX = ox + pad + ts + charW;
+    int nameLen = (int)std::strlen(to.name);
+    int gameLen = (int)std::strlen(to.game);
+    float textW = (float)std::max(nameLen, gameLen + 4) * charW;
+    float w = pad + ts + charW + textW + charW * 5.0f + pad;
+    float h = ts + pad * 2.0f;
+    SDL_FRect box = RaRect(ox, oy, w, h);
+    RaGlow(r, box, t, 4, charW * 0.5f);
+    RaGlassPanel(r, box, (Uint8)(80 * A / 255));
+    /* shimmer band sweeping across, 2.6s loop */
+    float phase = (float)((now) % 2600) / 2600.0f;
+    float bandW = w * 0.18f;
+    float bx = ox - bandW + (w + bandW) * phase;
+    SDL_FRect band = RaRect(bx, oy, bandW, h);
+    /* clip to box by intersecting manually (cheap: only draw if inside) */
+    if (bx + bandW > ox && bx < ox + w) {
+        RaFill(r, band, 255, 255, 255, (Uint8)(38 * A / 255));
+    }
+    RaTrophy(r, ox + pad, oy + pad, ts, t);
+    char kick[24]; std::snprintf(kick, sizeof kick, "* %s", t.label);
+    RaText(r, bodyX, oy + pad, kick, t.lr, t.lg, t.lb, A);
+    RaText(r, bodyX, oy + pad + charW * 1.4f, to.name, 255, 255, 255, A);
+    RaText(r, bodyX, oy + pad + charW * 2.8f, to.game, 195, 200, 210, A);
+    if (to.hasPoints) {
+        char xp[24]; std::snprintf(xp, sizeof xp, "%d pts", to.points);
+        float xpW = (float)std::strlen(xp) * charW;
+        RaText(r, ox + w - pad - xpW, oy + h * 0.5f - charW * 0.5f, xp, t.lr, t.lg, t.lb, A);
+    }
+}
+
+static void RaDrawMedalha(SDL_Renderer* r, float ox, float oy, const RaToast& to,
+                          const RaTier& t, int charW, Uint8 A) {
+    /* Circular medallion approximated as a square medal with a tier "ring"
+     * frame (the SDL_Renderer has no arc; squared off, as agreed). */
+    float md = charW * 4.2f;
+    /* ring frame */
+    RaFill(r, RaRect(ox, oy, md, md), t.mr, t.mg, t.mb, A);
+    RaFill(r, RaRect(ox + md*0.12f, oy + md*0.12f, md*0.76f, md*0.76f), 16, 18, 24, 255);
+    RaTrophy(r, ox + md*0.22f, oy + md*0.22f, md*0.56f, t);
+    /* body card, overlapping the medal slightly */
+    float cardX = ox + md - charW * 0.8f;
+    float pad = charW * 0.9f;
+    int nameLen = (int)std::strlen(to.name);
+    int gameLen = (int)std::strlen(to.game);
+    float textW = (float)std::max(nameLen, gameLen) * charW + charW * 4.0f;
+    float w = textW + pad * 2.0f;
+    float h = md;
+    SDL_FRect card = RaRect(cardX, oy + md*0.10f, w, h - md*0.20f);
+    RaGlassPanel(r, card, (Uint8)(36 * A / 255));
+    float tx = cardX + pad + charW;
+    RaText(r, tx, card.y + pad * 0.6f, "CONQUISTA DESBLOQUEADA", t.lr, t.lg, t.lb, A);
+    RaText(r, tx, card.y + pad * 0.6f + charW * 1.4f, to.name, 255, 255, 255, A);
+    RaText(r, tx, card.y + pad * 0.6f + charW * 2.8f, to.game, 190, 195, 205, A);
+    char meta[48];
+    std::snprintf(meta, sizeof meta, "%.1f%% - +%d XP", to.rarity, to.points);
+    RaText(r, tx, card.y + card.h - pad * 0.6f - charW, meta, 200, 205, 215, A);
+}
+
+static void RaDrawVitral(SDL_Renderer* r, float ox, float oy, const RaToast& to,
+                         const RaTier& t, int charW, Uint8 A) {
+    float pad = charW * 0.9f;
+    float ts = charW * 2.8f;
+    float bodyX = ox + pad + ts + charW;
+    int nameLen = (int)std::strlen(to.name);
+    int gameLen = (int)std::strlen(to.game);
+    float textW = (float)std::max(nameLen, gameLen + 6) * charW;
+    float w = pad + ts + charW + textW + charW * 5.0f + pad;
+    float h = ts + pad * 2.0f;
+    SDL_FRect box = RaRect(ox, oy, w, h);
+    RaGlassPanel(r, box, 0);
+    /* gradient-ish hairline: top edge in light tier, bottom in deep tier
+     * (the mockup's vitral-edge mask, squared to two coloured borders). */
+    RaFill(r, RaRect(box.x, box.y, box.w, 1.5f), t.lr, t.lg, t.lb, A);
+    RaFill(r, RaRect(box.x, box.y + box.h - 1.5f, box.w, 1.5f), t.dr, t.dg, t.db, A);
+    RaFill(r, RaRect(box.x, box.y, 1.5f, box.h), t.lr, t.lg, t.lb, (Uint8)(170 * A / 255));
+    RaFill(r, RaRect(box.x + box.w - 1.5f, box.y, 1.5f, box.h), t.dr, t.dg, t.db, (Uint8)(170 * A / 255));
+    /* hex trophy well -> diamond-ish: draw the trophy on a tinted plate */
+    RaFill(r, RaRect(ox + pad, oy + pad, ts, ts), t.dr/2, t.dg/2, t.db/2, A);
+    RaTrophy(r, ox + pad, oy + pad, ts, t);
+    char kick[48]; std::snprintf(kick, sizeof kick, "%s - %s", to.game, t.label);
+    RaText(r, bodyX, oy + pad, kick, t.lr, t.lg, t.lb, A);
+    RaText(r, bodyX, oy + pad + charW * 1.4f, to.name, 255, 255, 255, A);
+    RaText(r, bodyX, oy + pad + charW * 2.8f, to.game, 190, 195, 205, A);
+    if (to.hasPoints) {
+        char xp[24]; std::snprintf(xp, sizeof xp, "%d XP", to.points);
+        float xpW = (float)std::strlen(xp) * charW;
+        RaText(r, ox + w - pad - xpW, oy + h * 0.5f - charW * 0.5f, xp, t.lr, t.lg, t.lb, A);
+    }
+}
+
+/* Render the active RA unlock toast (if any), top-left like the mockup's
+ * toast-zone. Returns true if something was drawn. Variants 1 (Cartao) and 4
+ * (Medalha) slide from the left; the rest from the top, matching VARIANTS.dir. */
+static bool RaRenderToast(SDL_Renderer* r, int winW, int winH, int charW) {
+    (void)winW; (void)winH;
+    if (!sRaToast.active) return false;
+    unsigned int now = SDL_GetTicks();
+    if (now >= sRaToast.until + kRaOutMs) {
+        sRaToast.active = false;
+        return false;
+    }
+    int v = Port_Config_RaOverlayVariant();
+    if (v < 0 || v > 5) v = 1;
+    const RaTier& t = kRaTiers[(sRaToast.tier >= 0 && sRaToast.tier <= 3) ? sRaToast.tier : 0];
+
+    bool dirLeft = (v == 1 || v == 4);
+    float slide = dirLeft ? charW * 30.0f : charW * 10.0f;
+    RaAnim an = RaComputeAnim(sRaToast, dirLeft, slide, now);
+    Uint8 A = (Uint8)(255.0f * (an.alpha < 0 ? 0 : an.alpha > 1 ? 1 : an.alpha));
+
+    float ox = charW * 2.0f + an.dx;
+    float oy = charW * 2.0f + an.dy;
+
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+    switch (v) {
+        case 0: RaDrawPilula(r, ox, oy, sRaToast, t, charW, A); break;
+        case 1: RaDrawCartao(r, ox, oy, sRaToast, t, charW, A); break;
+        case 2: RaDrawMinimo(r, ox, oy, sRaToast, t, charW, A); break;
+        case 3: RaDrawBrilho(r, ox, oy, sRaToast, t, charW, A, now); break;
+        case 4: RaDrawMedalha(r, ox, oy, sRaToast, t, charW, A); break;
+        case 5: RaDrawVitral(r, ox, oy, sRaToast, t, charW, A); break;
+        default: RaDrawCartao(r, ox, oy, sRaToast, t, charW, A); break;
+    }
+    return true;
+}
+
 extern "C" void Port_DebugMenu_Render(SDL_Renderer* renderer, int winW, int winH) {
     if (!renderer) {
         return;
     }
 
     const int charW = Port_DebugMenu_CharW(renderer);
+
+    /* Rich RetroAchievements unlock overlay (issue #12), top-left. */
+    RaRenderToast(renderer, winW, winH, charW);
 
     /* Toast: visible whether menu is open or not, e.g. after a warp. */
     if (!sToast.empty() && SDL_GetTicks() < sToastUntilTicks) {
