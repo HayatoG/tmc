@@ -236,17 +236,33 @@ int main(int argc, char* argv[]) {
     mkdir("/switch", 0777);
     mkdir("/switch/tmc", 0777);
     chdir("/switch/tmc");
-    /* Capture all the port's fprintf(stderr,...) boot tracing to a file on
-     * the SD. Unbuffered so a hard freeze still leaves the last line on disk
-     * — read sdmc:/switch/tmc/tmc.log to see exactly where a hang happened.
+    /* Capture all the port's fprintf(stderr,...) tracing to a file on the SD.
+     * Unbuffered so a hard freeze still leaves the last line on disk — read
+     * sdmc:/switch/tmc/tmc.log to see exactly where a hang/crash happened.
      * Release builds (TMC_RELEASE) skip the file entirely and send stderr to
-     * /dev/null so there's no SD writes / I/O cost. */
+     * /dev/null so there's no SD writes / I/O cost.
+     *
+     * APPEND mode ("a"), not truncate ("w"): a crash that bounces back to
+     * hbmenu/sphaira and relaunches the game would otherwise truncate the log
+     * and wipe the very trace we crashed trying to capture (this is exactly how
+     * the issue #28 [SCENE] trace got lost). Each boot stamps a banner so
+     * sessions stay separable. The log is trimmed below if it grows too big. */
 #ifdef TMC_RELEASE
     freopen("/dev/null", "w", stderr);
 #else
-    freopen("tmc.log", "w", stderr);
+    /* Keep the log from growing without bound across many crash/relaunch cycles:
+     * if it's already large, start fresh; otherwise append to preserve the
+     * pre-crash trace. 2 MiB is plenty for several full sessions of [SCENE]. */
+    {
+        struct stat lst;
+        const char* mode = "a";
+        if (stat("tmc.log", &lst) == 0 && lst.st_size > (2 * 1024 * 1024)) {
+            mode = "w";
+        }
+        freopen("tmc.log", mode, stderr);
+    }
     setvbuf(stderr, NULL, _IONBF, 0);
-    fprintf(stderr, "=== TMC Switch boot log ===\n");
+    fprintf(stderr, "\n=== TMC Switch boot log ===\n");
 #endif
 
     /* Mount the .nro's embedded romfs (which carries a pre-baked asset cache)
@@ -270,6 +286,25 @@ int main(int argc, char* argv[]) {
         extern void Port_Net_Init(void);
         Port_Net_Init();
     }
+
+    /* Now that sockets are up, if we were launched via `nxlink -s`, open the
+     * host socket and hand its fd to the trace layer so every [SCENE] line is
+     * mirrored there live — IN ADDITION to the SD tmc.log. The helper redirects
+     * only stdout (not stderr), so it never clobbers our stderr→tmc.log; the
+     * trace layer write()s each line to this fd as well. Result: [SCENE] lines
+     * land in BOTH tmc.log and `nxlink -s`. Gated to debug builds (the trace
+     * layer doesn't exist on TMC_RELEASE). */
+#if !defined(TMC_RELEASE) && (!defined(SCENE_TRACE) || SCENE_TRACE)
+    {
+        extern int Port_Switch_NxlinkStdio(void);
+        extern void Port_SceneTrace_SetMirrorFd(int fd);
+        int nxfd = Port_Switch_NxlinkStdio();
+        if (nxfd >= 0) {
+            Port_SceneTrace_SetMirrorFd(nxfd);
+            fprintf(stderr, "[nxlink] stdio mirror active (fd=%d)\n", nxfd);
+        }
+    }
+#endif
 #endif
 
     /* Must run before any std::vector / new / malloc that could land in

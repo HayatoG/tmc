@@ -28,6 +28,8 @@ extern void* Port_LookupScriptFunc(u32 gba_addr);
 #define GE_FIELD(ent, fname) (&((GenericEntity*)(ent))->fname)
 #endif
 
+#include "port_scene_trace.h"
+
 void InitScriptExecutionContext(ScriptExecutionContext* context, Script* script);
 void sub_0807DE80(Entity*);
 void DisablePauseMenu(void);
@@ -213,6 +215,8 @@ void DestroyScriptExecutionContext(ScriptExecutionContext* context) {
      * routes NULL through port_resolve_addr → memset(NULL,…) → Data Abort. Guard
      * it (mirrors the NULL check gba_MemClear had on the original GBA path). */
     if (context == NULL) {
+        SCENE_LOG("DestroyScriptExecutionContext: context=NULL -> early return (guard d2dab851 fired; "
+                  "suspect for issue #28 empty-room cutscene)");
         return;
     }
 #endif
@@ -223,6 +227,7 @@ ScriptExecutionContext* StartCutscene(Entity* entity, Script* script) {
     ScriptExecutionContext* context;
 
     context = CreateScriptExecutionContext();
+    SCENE_LOG("StartCutscene: entity=%p script=%p ctx=%p", (void*)entity, (void*)script, (void*)context);
     if (context) {
         InitScriptForEntity(entity, context, script);
     }

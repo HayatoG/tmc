@@ -132,3 +132,6 @@ platforms/switch/icon_preview.png
 _icon_test_gray.png
 rom/
 *.7z
+
+# Claude Code local state (not project files)
+.claude/

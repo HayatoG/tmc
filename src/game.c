@@ -36,6 +36,45 @@
 #include "transitions.h"
 #include "ui.h"
 
+#include "port_scene_trace.h"
+
+#if SCENE_TRACE
+/* Count entities currently in a given gEntityLists bucket (issue #28 debug).
+ * Walks list->first via Entity.next. Used to log how many entities exist right
+ * before/after LoadRoom() and CreateZeldaFollower() so we can see exactly which
+ * step leaves the room empty in the broken castle cutscene. */
+static int SceneTrace_CountList(int listIdx) {
+    /* gEntityLists are circular: the list head doubles as the sentinel, so a
+     * walk ends when ent loops back to &list (see EraseAllEntities). Mirror that
+     * stop condition exactly, plus a hard cap as a stale-pointer backstop. */
+    LinkedList* list = &gEntityLists[listIdx];
+    Entity* e = list->first;
+    int n = 0;
+    while (e != NULL && (intptr_t)e != (intptr_t)list && n < 0x400) {
+        n++;
+        e = e->next;
+    }
+    return n;
+}
+
+static void SceneTrace_LogEntityCounts(const char* when) {
+    int i;
+    int total = 0;
+    char buf[128];
+    int off = 0;
+    for (i = 0; i < 9; i++) {
+        int c = SceneTrace_CountList(i);
+        total += c;
+        off += snprintf(buf + off, sizeof(buf) - off, "%s%d", i ? "," : "", c);
+        if (off >= (int)sizeof(buf) - 8)
+            break;
+    }
+    SCENE_LOG("entities %s: total=%d per-list=[%s]", when, total, buf);
+}
+#else
+#define SceneTrace_LogEntityCounts(when) ((void)0)
+#endif
+
 // Game task
 
 typedef void(GameState)(void);
@@ -131,6 +170,10 @@ static void GameTask_Transition(void) {
 
     gMain.state = GAMETASK_INIT;
     gMain.substate = GAMEMAIN_INITROOM;
+    SCENE_LOG("GameTask_Transition -> INIT: warp area=%u room=%u pos=(%d,%d) spawn_type=%u anim=%u",
+              gRoomTransition.player_status.area_next, gRoomTransition.player_status.room_next,
+              gRoomTransition.player_status.start_pos_x, gRoomTransition.player_status.start_pos_y,
+              gRoomTransition.player_status.spawn_type, gRoomTransition.player_status.start_anim);
 }
 
 static void GameTask_Init(void) {
@@ -149,6 +192,7 @@ static void GameTask_Init(void) {
     LoadGfxGroups();
     gGFXSlots.unk0 = 1;
     gMain.state = GAMETASK_MAIN;
+    SCENE_LOG("GameTask_Init: resolved gRoomControls area=%u room=%u", gRoomControls.area, gRoomControls.room);
 }
 
 static void GameTask_Main(void) {
@@ -173,9 +217,13 @@ static void GameMain_InitRoom(void) {
     gRoomTransition.field_0x4[0] = 0;
     gRoomTransition.field_0x4[1] = 0;
     MessageInitialize();
+    SCENE_LOG("GameMain_InitRoom: area=%u room=%u -> InitRoom()", gRoomControls.area, gRoomControls.room);
     InitRoom();
+    SCENE_LOG("GameMain_InitRoom: area location=%u dungeon_idx=%d meta=0x%x", gArea.locationIndex,
+              (int)gArea.dungeon_idx, (unsigned)gArea.areaMetadata);
     InitUI(FALSE);
     InitializeEntities();
+    SCENE_LOG("GameMain_InitRoom: InitializeEntities done");
 #ifndef EU
     sub_0801855C();
 #endif
@@ -349,8 +397,11 @@ static void InitializeEntities(void) {
     gUpdateVisibleTiles = 1;
     LoadRoomBgm();
     SetColor(0, 0);
+    SceneTrace_LogEntityCounts("before LoadRoom");
     LoadRoom();
+    SceneTrace_LogEntityCounts("after LoadRoom");
     CreateZeldaFollower();
+    SceneTrace_LogEntityCounts("after CreateZeldaFollower");
     CallRoomProp5And7();
     sub_0805329C();
     UpdateScrollVram();

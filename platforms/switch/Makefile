@@ -86,7 +86,8 @@ LIBS := -lSDL2 -lpng -lz -lEGL -lglapi -ldrm_nouveau \
 # libnx-thread parallel-for + background runner for on-device extraction,
 # applet lifecycle = docked resolution + HOME/sleep audio pause).
 SWITCH_SRCS := switch_stubs.c switch_romfs.c switch_parallel.c switch_applet.c \
-               switch_render_pool.c switch_net.c switch_perf.c compat/sdl3_debug_text.c
+               switch_render_pool.c switch_net.c switch_perf.c switch_nxlink.c \
+               compat/sdl3_debug_text.c
 
 # rcheevos (RetroAchievements, issue #12) — vendored submodule, ROOT-relative so
 # the $(ROOT)/%.c rule builds them. Pure C, no external deps; _WIN32 is undefined
