@@ -198,7 +198,7 @@ nro: $(TARGET).nro
 
 # APP_TITLE is set per-REGION near the top of this file.
 APP_AUTHOR  := zeldaret/999sian — Switch port
-APP_VERSION := 0.2.1.1
+APP_VERSION := 0.2.5
 APP_ICON    := $(if $(wildcard icon.jpg),icon.jpg,$(LIBNX)/default_icon.jpg)
 
 $(TARGET).nacp:
