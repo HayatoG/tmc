@@ -59,6 +59,11 @@ class BaseAsset {
         return start;
     }
 
+    // Returns the byte size of this asset (used to emit the port asset index).
+    [[nodiscard]] int getSize() const {
+        return size;
+    }
+
   protected:
     std::filesystem::path path;
     std::filesystem::path assetPath;

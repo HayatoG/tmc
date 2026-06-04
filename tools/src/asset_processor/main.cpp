@@ -46,6 +46,10 @@ Mode gMode;
 std::string gVariant;
 std::string gAssetsFolder;
 std::string gBaseromPath;
+// When TMC_ASSET_MANIFEST is set, EXTRACT mode appends "offset,size,path" lines
+// for every asset to that file. Used by tools/generate_asset_index.py to build a
+// region-correct port_asset_index_<region>.c (the committed one is USA-only).
+std::ofstream gManifest;
 
 static std::map<std::string, std::string> baseroms = { { "USA", "baserom.gba" },
                                                        { "EU", "baserom_eu.gba" },
@@ -105,6 +109,14 @@ int main(int argc, char** argv) {
     if (!std::filesystem::exists(gBaseromPath)) {
         std::cerr << "Error: You need to provide a " << gVariant << " ROM as " << gBaseromPath << std::endl;
         std::exit(1);
+    }
+
+    // Optional asset-index manifest (offset,size,path per asset).
+    if (const char* manifestPath = std::getenv("TMC_ASSET_MANIFEST")) {
+        gManifest.open(manifestPath, std::ios::out | std::ios::trunc);
+        if (!gManifest) {
+            std::cerr << "Warning: could not open manifest " << manifestPath << std::endl;
+        }
     }
 
     // Read baserom.
@@ -179,6 +191,12 @@ int main(int argc, char** argv) {
                 switch (gMode) {
                     case EXTRACT: {
                         std::unique_ptr<BaseAsset> assetHandler = getAssetHandlerByType(path, asset, currentOffset);
+                        if (gManifest.is_open()) {
+                            // Region-correct ROM offset + size for this asset, keyed
+                            // by the index-relative path (asset["path"]).
+                            gManifest << assetHandler->getStart() << ',' << assetHandler->getSize() << ','
+                                      << asset["path"].get<std::string>() << '\n';
+                        }
                         if (shouldExtractAsset(path, configModified)) {
                             if (gVerbose) {
                                 std::cout << "Extracting " << path << "..." << std::endl;
