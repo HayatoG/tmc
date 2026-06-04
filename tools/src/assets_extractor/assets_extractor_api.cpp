@@ -287,23 +287,56 @@ bool ExtractAssets(const Options& opt, std::string* error)
 
     const auto t0 = std::chrono::steady_clock::now();
 
+    /* ── Region-aware base offsets ──────────────────────────────────────────
+     * The standalone pre-bake extractor historically hardcoded USA. Detect the
+     * region from the ROM header game code (0xAC: "BZME" = USA, "BZMP" = EU)
+     * and pick the matching root-table offsets, exactly like
+     * Port_DetectRomRegion in port_rom.c. The EU values mirror kRomOffsets_EU
+     * there (derived from build/EU/tmc_eu.map); every EU root differs from USA,
+     * so nothing is shared between regions. The Brazilian (BR) cart is
+     * byte-identical to the European ROM (game code BZMP) and so lands on the
+     * EU branch here — its assets are extracted with the EU offsets. */
+    const bool romIsEU = Rom.size() > 0xAF && Rom[0xAC] == 'B' && Rom[0xAD] == 'Z' &&
+                         Rom[0xAE] == 'M' && Rom[0xAF] == 'P';
+
     Config config;
-    config.gfxGroupsTableOffset = 0x100AA8;
-    config.gfxGroupsTableLength = 133;
-    config.paletteGroupsTableOffset = 0x0FF850;
-    config.paletteGroupsTableLength = 208;
-    config.globalGfxAndPalettesOffset = 0x5A2E80;
-    config.mapDataOffset = 0x324AE4;
-    config.areaRoomHeadersTableOffset = 0x11E214;
-    config.areaTileSetsTableOffset = 0x10246C;
-    config.areaRoomMapsTableOffset = 0x107988;
-    config.areaTableTableOffset = 0x0D50FC;
-    config.areaTilesTableOffset = 0x10309C;
-    config.spritePtrsTableOffset = 0x0029B4;
-    config.spritePtrsCount = 329;
-    config.translationsTableOffset = 0x109214;
-    config.language = 1;
-    config.variant = "USA";
+    if (romIsEU) {
+        config.gfxGroupsTableOffset = 0x100204;
+        config.gfxGroupsTableLength = 133;
+        config.paletteGroupsTableOffset = 0x0FED88;
+        config.paletteGroupsTableLength = 208;
+        config.globalGfxAndPalettesOffset = 0x5A23D0;
+        config.mapDataOffset = 0x323FEC;
+        config.areaRoomHeadersTableOffset = 0x11D95C;
+        config.areaTileSetsTableOffset = 0x101BC8;
+        config.areaRoomMapsTableOffset = 0x1070E4;
+        config.areaTableTableOffset = 0x0D4828;
+        config.areaTilesTableOffset = 0x1027F8;
+        config.spritePtrsTableOffset = 0x002A5C;
+        config.spritePtrsCount = 329;
+        config.translationsTableOffset = 0x108968;
+        config.language = 1;
+        config.variant = "EU";
+        fmt::print(stderr, "[extractor] ROM region: EU/BR (BZMP) -> EU offsets\n");
+    } else {
+        config.gfxGroupsTableOffset = 0x100AA8;
+        config.gfxGroupsTableLength = 133;
+        config.paletteGroupsTableOffset = 0x0FF850;
+        config.paletteGroupsTableLength = 208;
+        config.globalGfxAndPalettesOffset = 0x5A2E80;
+        config.mapDataOffset = 0x324AE4;
+        config.areaRoomHeadersTableOffset = 0x11E214;
+        config.areaTileSetsTableOffset = 0x10246C;
+        config.areaRoomMapsTableOffset = 0x107988;
+        config.areaTableTableOffset = 0x0D50FC;
+        config.areaTilesTableOffset = 0x10309C;
+        config.spritePtrsTableOffset = 0x0029B4;
+        config.spritePtrsCount = 329;
+        config.translationsTableOffset = 0x109214;
+        config.language = 1;
+        config.variant = "USA";
+        fmt::print(stderr, "[extractor] ROM region: USA (BZME) -> USA offsets\n");
+    }
     config.outputRoot = opt.editable_root;
     config.runtimeOutputRoot = opt.runtime_root;
     /* runtime_only deletes the editable tree afterwards, so don't write it at

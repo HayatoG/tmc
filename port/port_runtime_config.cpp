@@ -355,7 +355,12 @@ extern "C" int Port_Switch_SystemLanguage(void); /* switch_applet.c (C linkage):
 #endif
 
 static int Port_Config_DefaultLanguage(void) {
-#ifdef __SWITCH__
+#ifdef TMC_DEFAULT_LANG_PT
+    /* BR build (make REGION=BR): default the overlay UI to Português
+     * regardless of the console's system language. The user can still cycle
+     * it on the Minus overlay; the choice then persists in config.json. */
+    return 1; /* 1 = Português */
+#elif defined(__SWITCH__)
     int l = Port_Switch_SystemLanguage();
     return (l >= 0 && l <= 2) ? l : 0;
 #else

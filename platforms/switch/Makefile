@@ -22,9 +22,45 @@ CC  := $(PREFIX)gcc
 CXX := $(PREFIX)g++
 
 ROOT     := ../..
-BUILD    := build
-TARGET   := tmc_switch
-GAME_VER := USA
+
+# ---------------------------------------------------------------------------
+# Region selection. Build one .nro per region, each with its own object dir,
+# embedded romfs cache, title and (for BR) default overlay language:
+#     make REGION=USA   -> tmc_switch_usa.nro  (BZME, USA assets)
+#     make REGION=EU    -> tmc_switch_eu.nro   (BZMP, EU  assets)
+#     make REGION=BR    -> tmc_switch_br.nro   (BZMP, EU  assets, PT-BR overlay)
+# The Brazilian cart is byte-identical to the European ROM (game code BZMP),
+# so BR compiles with the EU game define + EU offset headers but ships its own
+# romfs_br cache and BR branding. GAME_VER drives the -D<ver> define and the
+# build/<ver> offset-header include; REGION drives everything user-facing.
+# ---------------------------------------------------------------------------
+REGION    ?= USA
+REGION_LC := $(shell echo $(REGION) | tr A-Z a-z)
+
+# Each region builds for its own ROM (game code BZME).
+#   USA -> baserom.gba     (BZME, US cart)
+#   BR  -> baserom_br.gba  (the romsportugues T1.0 PT-BR translation — a USA-based
+#          hack, game code BZME) → builds on the USA engine path (GAME_VER=USA)
+#          with BR-translated assets + a default PT-BR overlay.
+# (The genuine European cart BZMP is NOT supported: the upstream 999sian port's
+# EU support is incomplete — it renders the intro then faults. The region-aware
+# tooling to regenerate EU data lives in tools/generate_*.py if revisited.)
+ifeq ($(REGION),BR)
+GAME_VER       := USA
+REGION_DEFINES := -DTMC_DEFAULT_LANG_PT
+APP_TITLE      := The Minish Cap (BR)
+else ifeq ($(REGION),USA)
+GAME_VER       := USA
+REGION_DEFINES :=
+APP_TITLE      := The Minish Cap
+else
+$(error Unknown REGION '$(REGION)' — use USA or BR)
+endif
+
+# Per-region object dir + target so the three builds never share .o files
+# (they compile with different -D defines and offset headers).
+BUILD    := build/$(REGION)
+TARGET   := tmc_switch_$(REGION_LC)
 
 # Build flavour: RELEASE=0 (default) is the debug build — writes tmc.log /
 # applet.log / render_pool.log to the SD and keeps -g debug symbols. RELEASE=1
@@ -36,11 +72,18 @@ RELEASE ?= 0
 
 include sources.mk
 
+# The baked compile-time ROM tables (port_rom_tables.c — kSpritePtrEntries,
+# kAreaRoomHeaderOffsets, kFrameObjListsData, ...) are USA ROM offsets. An EU
+# build must link EU-correct tables or it calls garbage function pointers and
+# faults at AgbMain (gSpriteAnimations_322 -> 0 entries -> Instruction Abort).
+# For GAME_VER=EU, swap in the region-generated port_rom_tables_eu.c (produced
+# by tools/generate_rom_tables.py emit EU). Same symbol names, so exactly one is
+# compiled. USA/BR (BZME) keep the committed USA tables.
 ARCH := -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -ftls-model=local-exec -fPIE
 
 DEFINES := -D__SWITCH__ -DPC_PORT -DNON_MATCHING -D$(GAME_VER) -DENGLISH -DREVISION=0 \
            -DFMT_HEADER_ONLY=1 -DTMC_PC_VERSION=\"0.2.1.1\" -DTMC_PORT_VERSION=\"0.2.1.1\" \
-           -DMODE1_GBA_WIDTH=288 -DCURL_STATICLIB -DTMC_GPU_RENDER
+           -DMODE1_GBA_WIDTH=288 -DCURL_STATICLIB -DTMC_GPU_RENDER $(REGION_DEFINES)
 # Add -DTMC_PERF to enable the frame profiler (switch_perf.c → perf.log).
 
 # Release flavour: define TMC_RELEASE (gates SD logging in the C/C++ sources).
@@ -130,11 +173,19 @@ RCHEEVOS_SRCS := \
 # Optional embedded romfs (pre-baked asset cache). Populated by
 # build_extractor.sh into ./romfs/. If present, elf2nro bundles it so the .nro
 # is self-contained and the user only needs to supply baserom.gba.
-ROMFS_DIR := romfs
+ROMFS_DIR := romfs_$(REGION_LC)
 ROMFS_ARG := $(if $(wildcard $(ROMFS_DIR)/*),--romfsdir=$(ROMFS_DIR),)
+
+# Port-side sources not (yet) listed in sources.mk. port_scene_trace.c provides
+# Port_SceneTrace_Emit() behind the SCENE_LOG() macro (issue #28 room/transition
+# tracing). SCENE_LOG is live on the debug build (PC_PORT && !TMC_RELEASE) and a
+# no-op header otherwise, so the .o is empty on release but the symbol must be
+# linkable on debug — game.c/room.c/script.c reference it. ROOT-relative.
+PORT_SRCS := port/port_scene_trace.c
 
 OBJS := $(addprefix $(BUILD)/, $(SWITCH_SRCS:.c=.o)) \
         $(addprefix $(BUILD)/, $(RCHEEVOS_SRCS:.c=.o)) \
+        $(addprefix $(BUILD)/, $(PORT_SRCS:.c=.o)) \
         $(addprefix $(BUILD)/, $(C_SOURCES:.c=.o)) \
         $(addprefix $(BUILD)/, $(CPP_SOURCES:.cpp=.o))
 
@@ -145,7 +196,7 @@ all: $(TARGET).nro
 
 nro: $(TARGET).nro
 
-APP_TITLE   := The Minish Cap
+# APP_TITLE is set per-REGION near the top of this file.
 APP_AUTHOR  := zeldaret/999sian — Switch port
 APP_VERSION := 0.2.1.1
 APP_ICON    := $(if $(wildcard icon.jpg),icon.jpg,$(LIBNX)/default_icon.jpg)
